@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 import openai
 import json
 from textwrap import dedent
+import boto3
+import time
+from botocore.exceptions import ClientError
 
 
 application = Flask(__name__)
@@ -13,6 +16,26 @@ cors = CORS(application)
 
 load_dotenv()
 # SOME_VAR = os.getenv('VAR_NAME')
+openai.api_key = os.getenv('OPENAI_KEY')
+
+# Configure AWS S3 and AWS transcribe
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
+AWS_REGION = "us-west-2"
+S3_AUDIO_BUCKET_NAME = "customer-service-qa-audio"
+S3_TRANSCRIPT_BUCKET_NAME = "customer-service-qa-transcripts"
+s3_client = boto3.client(
+    "s3",
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=AWS_REGION
+)
+transcribe_client = boto3.client(
+    "transcribe",
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=AWS_REGION
+)
 
 @application.route('/')
 def index():
@@ -64,9 +87,7 @@ def process_transcript(standards, categories, transcript):
         }
     }
     
-
     # make request to llm using prompt
-    openai.api_key = os.getenv('OPENAI_KEY')
     MODEL = "gpt-4o-2024-08-06"
     response = openai.chat.completions.create(
         model=MODEL,
@@ -109,3 +130,124 @@ def analyze_transcript():
     
     # except Exception as e:
     #     return jsonify({"error": str(e)}), 500
+
+@application.route('/upload-audio', methods=['POST'])
+def upload_audio():
+    if 'audio_files' not in request.files:
+        return jsonify({"error": "No audio files provided"}), 400
+
+    # Retrieve the list of files
+    files = request.files.getlist('audio_files')
+
+    if not files or any(file.filename == '' for file in files):
+        return jsonify({"error": "One or more files are missing filenames"}), 400
+
+    uploaded_files = []
+
+    # Save each file to S3
+    try:
+        for file in files:
+            # Use a unique filename if necessary to avoid overwrites
+            unique_filename = f"{int(time.time())}-{file.filename}"
+            was_uploaded = s3_client.upload_fileobj(file, S3_AUDIO_BUCKET_NAME, unique_filename)
+            if not was_uploaded:
+                print("failed to upload:", file.filename)
+            file_url = f"s3://{S3_AUDIO_BUCKET_NAME}/{unique_filename}"
+            uploaded_files.append({"filename": unique_filename, "file_url": file_url})
+
+        return jsonify({"message": "Files uploaded successfully", "uploaded_files": uploaded_files}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@application.route('/transcribe-audio', methods=['POST'])
+def transcribe_audio():
+    data = request.json
+    file_url = data.get('file_url')  # e.g., "s3://your-bucket-name/audio-file.mp3"
+    job_name = f"transcription-job-{int(time.time())}"  # Unique job name
+
+    try:
+        response = transcribe_client.start_transcription_job(
+            TranscriptionJobName=job_name,
+            Media={"MediaFileUri": file_url},
+            MediaFormat="mp3",  # Change based on file type
+            LanguageCode="en-US",  # Update for other languages
+            OutputBucketName=S3_TRANSCRIPT_BUCKET_NAME  # Optional: Save transcription in S3
+        )
+        return jsonify({"message": "Transcription job started", "job_name": job_name}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+@application.route('/transcription-result/<job_name>', methods=['GET'])
+def transcription_result(job_name):
+    try:
+        while True:
+            job_status = transcribe_client.get_transcription_job(TranscriptionJobName=job_name)
+            status = job_status["TranscriptionJob"]["TranscriptionJobStatus"]
+
+            if status == "COMPLETED":
+                transcript_file_uri = job_status["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
+                return jsonify({"message": "Transcription completed", "transcript_url": transcript_file_uri}), 200
+            elif status == "FAILED":
+                return jsonify({"error": "Transcription job failed"}), 500
+
+            time.sleep(5)  # Poll every 5 seconds
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+@application.route('/upload-and-transcribe', methods=['POST'])
+def upload_and_transcribe():
+    if 'audio_files' not in request.files:
+        return jsonify({"error": "No audio files provided"}), 400
+
+    # Retrieve the list of files
+    files = request.files.getlist('audio_files')
+
+    if not files or any(file.filename == '' for file in files):
+        return jsonify({"error": "One or more files are missing filenames"}), 400
+
+    results = []
+
+    # Process each file
+    try:
+        error_flag = False
+        for file in files:
+            # Use a unique filename to avoid overwrites
+            unique_filename = f"{int(time.time())}-{file.filename}"
+            s3_file_path = f"s3://{S3_AUDIO_BUCKET_NAME}/{unique_filename}"
+
+            # Upload the file to S3
+            s3_client.upload_fileobj(file, S3_AUDIO_BUCKET_NAME, unique_filename)
+            was_uploaded = True # TODO: implement logic to check if it was actually loaded
+            if not was_uploaded:
+                print("failed to upload file:", file.filename)
+                error_flag = True
+                results.append({
+                    "filename": file.filename,
+                    "s3_url": s3_file_path,
+                    "job_name": "None",
+                    "message": "Failed to upload file to S3"
+                })
+                continue
+
+            # Start a transcription job for the uploaded file
+            job_name = f"transcription-job-{int(time.time())}-{file.filename.replace('.', '-')}"
+            transcribe_client.start_transcription_job(
+                TranscriptionJobName=job_name,
+                Media={"MediaFileUri": s3_file_path},
+                MediaFormat='mp3',
+                LanguageCode="en-US",  # Update for other languages
+                OutputBucketName=S3_TRANSCRIPT_BUCKET_NAME 
+            )
+
+            results.append({
+                "filename": file.filename,
+                "s3_url": s3_file_path,
+                "job_name": job_name,
+                "message": "File uploaded and transcription job started"
+            })
+        return_msg = "All files processed successfully" if not error_flag else "A file failed to upload"
+        return jsonify({"message": return_msg, "results": results}), 200
+    except ClientError as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
