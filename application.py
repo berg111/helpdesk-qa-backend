@@ -54,6 +54,30 @@ Base.metadata.create_all(engine) # Create tables if they don't exist
 def index():
     return "Root"
 
+@application.route('/get-transcript/<transcript_filename>', methods=['GET'])
+def get_transcript(transcript_filename):
+    '''
+    Transcripts are stored in S3 (currently). And follow the 
+    naming convention https://bucket-name.s3.region.amazonaws.com/object-key 
+    or s3://bucket-name/object-key. If a transcript hasn't processed yet, 
+    we can account for that here.
+    '''
+    try:
+        response = s3_client.get_object(Bucket=S3_TRANSCRIPT_BUCKET_NAME, Key=transcript_filename)
+        file_content = response['Body'].read().decode('utf-8')
+        transcript_json = json.loads(file_content)
+        return transcript_json
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == "NoSuchKey":
+            print("File not found")
+            return {"status": "PENDING"}
+        print(f"ClientError: {error_code} - {e}")
+        return {"error": f"ClientError: {error_code}"}
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return {"error": str(e)}
+
 def process_transcript(standards, categories, transcript):
     '''
     standards: string | the standards to compare the transcript to.
@@ -121,150 +145,7 @@ def process_transcript(standards, categories, transcript):
     print("Response from openAI:\n", response.choices[0].message.content)
 
     return response.choices[0].message.content
-
-@application.route('/analyze-transcript', methods=['POST'])
-def analyze_transcript():
-    # try:
-    # Get the JSON object from the request
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({"error": "No JSON data provided"}), 400
-    
-    # Process the JSON object
-    # print("Received JSON:", data)
-    results = process_transcript(data['standards'], data['categories'], data['transcript'])
-    results_json = json.loads(results)
-
-    # Respond back with a success message
-    response = jsonify({"message": "Request processed successfully", "results": results_json}), 200
-    print("Sending back response:\n", response)
-    return response
-    
-    # except Exception as e:
-    #     return jsonify({"error": str(e)}), 500
-
-@application.route('/upload-audio', methods=['POST'])
-def upload_audio():
-    if 'audio_files' not in request.files:
-        return jsonify({"error": "No audio files provided"}), 400
-
-    # Retrieve the list of files
-    files = request.files.getlist('audio_files')
-
-    if not files or any(file.filename == '' for file in files):
-        return jsonify({"error": "One or more files are missing filenames"}), 400
-
-    uploaded_files = []
-
-    # Save each file to S3
-    try:
-        for file in files:
-            # Use a unique filename if necessary to avoid overwrites
-            unique_filename = f"{int(time.time())}-{file.filename}"
-            was_uploaded = s3_client.upload_fileobj(file, S3_AUDIO_BUCKET_NAME, unique_filename)
-            if not was_uploaded:
-                print("failed to upload:", file.filename)
-            file_url = f"s3://{S3_AUDIO_BUCKET_NAME}/{unique_filename}"
-            uploaded_files.append({"filename": unique_filename, "file_url": file_url})
-
-        return jsonify({"message": "Files uploaded successfully", "uploaded_files": uploaded_files}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@application.route('/transcribe-audio', methods=['POST'])
-def transcribe_audio():
-    data = request.json
-    file_url = data.get('file_url')  # e.g., "s3://your-bucket-name/audio-file.mp3"
-    job_name = f"transcription-job-{int(time.time())}"  # Unique job name
-
-    try:
-        response = transcribe_client.start_transcription_job(
-            TranscriptionJobName=job_name,
-            Media={"MediaFileUri": file_url},
-            MediaFormat="mp3",  # Change based on file type
-            LanguageCode="en-US",  # Update for other languages
-            OutputBucketName=S3_TRANSCRIPT_BUCKET_NAME  # Optional: Save transcription in S3
-        )
-        return jsonify({"message": "Transcription job started", "job_name": job_name}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
-@application.route('/transcription-result/<job_name>', methods=['GET'])
-def transcription_result(job_name):
-    try:
-        while True:
-            job_status = transcribe_client.get_transcription_job(TranscriptionJobName=job_name)
-            status = job_status["TranscriptionJob"]["TranscriptionJobStatus"]
-
-            if status == "COMPLETED":
-                transcript_file_uri = job_status["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
-                return jsonify({"message": "Transcription completed", "transcript_url": transcript_file_uri}), 200
-            elif status == "FAILED":
-                return jsonify({"error": "Transcription job failed"}), 500
-
-            time.sleep(5)  # Poll every 5 seconds
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
-# @application.route('/upload-and-transcribe', methods=['POST'])
-# def upload_and_transcribe():
-#     if 'audio_files' not in request.files:
-#         return jsonify({"error": "No audio files provided"}), 400
-
-#     # Retrieve the list of files
-#     files = request.files.getlist('audio_files')
-
-#     if not files or any(file.filename == '' for file in files):
-#         return jsonify({"error": "One or more files are missing filenames"}), 400
-
-#     results = []
-
-#     # Process each file
-#     try:
-#         error_flag = False
-#         for file in files:
-#             # Use a unique filename to avoid overwrites
-#             unique_filename = f"{int(time.time())}-{file.filename}"
-#             s3_file_path = f"s3://{S3_AUDIO_BUCKET_NAME}/{unique_filename}"
-
-#             # Upload the file to S3
-#             s3_client.upload_fileobj(file, S3_AUDIO_BUCKET_NAME, unique_filename)
-#             was_uploaded = True # TODO: implement logic to check if it was actually loaded
-#             if not was_uploaded:
-#                 print("failed to upload file:", file.filename)
-#                 error_flag = True
-#                 results.append({
-#                     "filename": file.filename,
-#                     "s3_url": s3_file_path,
-#                     "job_name": "None",
-#                     "message": "Failed to upload file to S3"
-#                 })
-#                 continue
-
-#             # Start a transcription job for the uploaded file
-#             job_name = f"transcription-job-{int(time.time())}-{file.filename.replace('.', '-')}"
-#             transcribe_client.start_transcription_job(
-#                 TranscriptionJobName=job_name,
-#                 Media={"MediaFileUri": s3_file_path},
-#                 MediaFormat='mp3',
-#                 LanguageCode="en-US",  # Update for other languages
-#                 OutputBucketName=S3_TRANSCRIPT_BUCKET_NAME 
-#             )
-
-#             results.append({
-#                 "filename": file.filename,
-#                 "s3_url": s3_file_path,
-#                 "job_name": job_name,
-#                 "message": "File uploaded and transcription job started"
-#             })
-#         return_msg = "All files processed successfully" if not error_flag else "A file failed to upload"
-#         return jsonify({"message": return_msg, "results": results}), 200
-#     except ClientError as e:
-#         return jsonify({"error": str(e)}), 500
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
-
+ 
 @application.route('/upload-and-transcribe', methods=['POST'])
 def upload_and_transcribe():
     session = Session()
@@ -281,6 +162,7 @@ def upload_and_transcribe():
     try:
         for file in files:
             unique_filename = f"{int(time.time())}-{file.filename}"
+            audio_filename = unique_filename
             s3_file_path = f"s3://{S3_AUDIO_BUCKET_NAME}/{unique_filename}"
 
             # Upload file to S3
@@ -318,17 +200,16 @@ def upload_and_transcribe():
                 organization="ExampleOrg",  # TODO: Replace with real data
                 customer="John Doe",       # TODO: Replace with real data
                 agent="Agent Name",        # TODO: Replace with real data
-                audio_s3_url=s3_file_path,
-                transcript_s3_url=None,    # Will be updated after transcription
-                job_name=job_name,
+                audio_filename=audio_filename,
+                transcript_filename=f"{job_name}.json"
             )
             session.add(interaction)
             session.commit()
 
             results.append({
                 "filename": file.filename,
-                "s3_url": s3_file_path,
-                "job_name": job_name,
+                "audio_filename": audio_filename,
+                "transcript_filename": f"{job_name}.json",
                 "message": "File uploaded and transcription job started"
             })
 
