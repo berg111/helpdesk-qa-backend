@@ -78,10 +78,129 @@ def get_transcript(transcript_filename):
         print(f"An error occurred: {e}")
         return {"error": str(e)}
 
-def process_transcript(standards, categories, transcript):
+@application.route('/analyze-transcript', methods=['POST'])
+def analyze_transcript(transcript, categories, standard, questions):
+    '''
+    Calculates the following metrics:
+        - Periods of silence
+        - (AI) Sentiment for audio-segment (postive, negative, neutral)
+        - (AI) Scores for a list of user-defined categories
+        - (AI) An overview of how the interaction compares to a user-defined standard 
+          (a textual explanation of what an interaction should look like.)
+        - (AI) A text summary of the interaction
+        - (AI) A list of answers to user-defined questions (ex: "Did 
+          the agent greet the customer?")
+    
+    Example inputs:
+        categories = ["Politeness", "Clarity", "Resolution"]
+        standard = "The agent should greet the customer, listen carefully, and resolve their issue politely."
+        questions = ["Did the agent greet the customer?", "Did the agent resolve the customer's issue?"]
+    '''
+    # Get periods of silence
+    silent_periods = [] # [[start_time, end_time], ...]
+    silence_threshold_seconds = 20
+    for i in range(len(transcript) - 1):
+        left_segment_end = transcript[i]['end_time']
+        right_segment_start = transcript[i+1]['start_time']
+        gap = right_segment_start-left_segment_end
+        if gap >= silence_threshold_seconds:
+            silent_periods.append([left_segment_end, right_segment_start])
+
+    # Send transcript to AI model to get additional results
+    # Define the JSON schema for output
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "sentiments": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Sentiment analysis results: Positive, Neutral, or Negative for each segment."
+            },
+            "scores": {
+                "type": "object",
+                "additionalProperties": {"type": "number"},
+                "description": "Category scores where keys are categories and values are scores out of 10."
+            },
+            "comparison": {"type": "string", "description": "Comparison of the interaction against the user standard."},
+            "summary": {"type": "string", "description": "A summary of the entire transcript."},
+            "answers": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "description": "Answers to user-defined questions about the interaction."
+            }
+        },
+        "required": ["sentiments", "scores", "comparison", "summary", "answers"]
+    }
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "transcript_analysis",
+            "schema": output_schema,
+            "strict": True
+        }
+    }
+    # Construct the system role and user message
+    messages = [
+        {"role": "system", "content": "You are an assistant that analyzes customer service transcripts and outputs structured JSON."},
+        {"role": "user", "content": f"""
+    Analyze the following customer service transcript:
+
+    Transcript:
+    {" ".join([f"({segment['start_time']}s - {segment['end_time']}s): {segment['transcript']}" for segment in transcript])}
+
+    Perform the following tasks:
+    1. Analyze sentiment for each transcript segment as Positive, Negative, or Neutral.
+    2. Score the conversation based on these categories: {', '.join(categories)}.
+    3. Compare the conversation against this standard: "{standard}".
+    4. Summarize the entire interaction in a single paragraph.
+    5. Answer these questions:
+    {" ".join([f"- {q}" for q in questions])}.
+
+    Return the output in structured JSON format according to the provided schema.
+    """}
+    ]
+    # make request to llm using prompt
+    MODEL = "gpt-4o-2024-08-06"
+    response = openai.chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        response_format=response_format
+    )
+    results = response.choices[0].message.content
+    # TODO: Format results into json and add silent_periods
+    return results, silent_periods
+
+def analyze_transcript_openAI(standards, categories, transcript):
     '''
     standards: string | the standards to compare the transcript to.
-    transcript: key-pair object / dict | the conversation we are analyzing.
+    transcript: the conversation we are analyzing. A list of audio segments
+    "transcript": [
+      {
+        "end_time": "2.029",
+        "id": 0,
+        "items": [0, 1, 2, 3, 4, 5, 6, 7],
+        "speaker_label": "spk_0",
+        "start_time": "0.0",
+        "transcript": "I want to move to New York,"
+      },
+      {
+        "end_time": "3.91",
+        "id": 1,
+        "items": [8, 9, 10, 11, 12, 13, 14],
+        "speaker_label": "spk_1",
+        "start_time": "2.369",
+        "transcript": "to the state or the city,"
+      },
+      {
+        "end_time": "5.469",
+        "id": 2,
+        "items": [15, 16, 17, 18, 19, 20],
+        "speaker_label": "spk_0",
+        "start_time": "4.07",
+        "transcript": "the city. Of course,"
+      },
+      ...
+      ]
     '''
     qa_agent_prompt = """
         You are a quality assurance agent working for a company that interacts 
@@ -179,12 +298,17 @@ def upload_and_transcribe():
             # Start transcription
             job_name = f"transcription-job-{int(time.time())}-{file.filename.replace('.', '-')}"
             try:
+                print(f"Starting Job {job_name}")
                 transcribe_client.start_transcription_job(
                     TranscriptionJobName=job_name,
                     Media={"MediaFileUri": s3_file_path},
                     MediaFormat='mp3',
                     LanguageCode="en-US",
-                    OutputBucketName=S3_TRANSCRIPT_BUCKET_NAME
+                    OutputBucketName=S3_TRANSCRIPT_BUCKET_NAME,
+                    Settings={
+                        'ShowSpeakerLabels': True,
+                        'MaxSpeakerLabels': 2
+                    }
                 )
             except Exception as e:
                 error_flag = True
