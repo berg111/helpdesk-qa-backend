@@ -22,20 +22,35 @@ cors = CORS(application)
 load_dotenv()
 # SOME_VAR = os.getenv('VAR_NAME')
 
-# Configure AWS S3
+# Configure AWS Resources
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 AWS_REGION = "us-west-2"
+# s3
 S3_AUDIO_BUCKET_NAME = "customer-service-qa-audio"
-S3_TRANSCRIPT_BUCKET_NAME = "customer-service-qa-transcripts"
 s3_client = boto3.client(
     "s3",
     aws_access_key_id=AWS_ACCESS_KEY,
     aws_secret_access_key=AWS_SECRET_KEY,
     region_name=AWS_REGION
 )
-
-# Configure AWS RDS connection
+# AWS Transcribe
+S3_TRANSCRIPT_BUCKET_NAME = "customer-service-qa-transcripts"
+transcribe_client = boto3.client(
+    "transcribe",
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=AWS_REGION
+)
+# AWS SQS
+SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
+sqs = boto3.client(
+    "sqs",
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=AWS_REGION
+)
+# AWS RDS
 AWS_DATABASE_USER = os.getenv("AWS_DATABASE_USER")
 AWS_DATABASE_PASS = os.getenv("AWS_DATABASE_PASS")
 AWS_DATABASE_ENDPOINT = os.getenv("AWS_DATABASE_ENDPOINT")
@@ -45,17 +60,6 @@ DATABASE_URI = f"postgresql://{AWS_DATABASE_USER}:{AWS_DATABASE_PASS}@{AWS_DATAB
 engine = create_engine(DATABASE_URI)
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine) # Create tables if they don't exist
-
-AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
-AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
-AWS_REGION = "us-west-2"
-sqs = boto3.client(
-    "sqs",
-    aws_access_key_id=AWS_ACCESS_KEY,
-    aws_secret_access_key=AWS_SECRET_KEY,
-    region_name=AWS_REGION
-)
-SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL") # TODO: get url
 
 @application.route('/')
 def index():
@@ -83,7 +87,7 @@ def upload_audio_to_s3(file, filename):
         raise e
     return unique_filename
 
-def create_customer_interaction(audio_filename, organization_id, agent_id):
+def create_customer_interaction(audio_filename, transcript_filename, organization_id, agent_id):
     '''
     Create a new entry in the customer_interactions table in the DB and set processing 
     status to "PENDING".
@@ -91,12 +95,30 @@ def create_customer_interaction(audio_filename, organization_id, agent_id):
     # TODO
     pass
 
+def start_transcription_job(filename):
+    s3_audio_file_path = f"s3://{S3_AUDIO_BUCKET_NAME}/{filename}"
+    try:
+        # print(f"Starting Job {filename}")
+        transcribe_client.start_transcription_job(
+            TranscriptionJobName=filename,
+            Media={"MediaFileUri": s3_audio_file_path},
+            MediaFormat='mp3',
+            LanguageCode="en-US",
+            OutputBucketName=S3_TRANSCRIPT_BUCKET_NAME,
+            Settings={
+                'ShowSpeakerLabels': True,
+                'MaxSpeakerLabels': 2
+            }
+        )
+    except Exception as e:
+        print(filename, "failed to start transaction job:", e)
+
 @application.route('/upload-and-analyze', methods=['POST'])
 def upload_and_analyze():
     '''
     Sends a job to worker
     '''
-    start_time = time.time()
+    # start_time = time.time()
     # Get audio files from request
     if 'audio_files' not in request.files:
         return jsonify({"error": "No audio files provided"}), 400
@@ -105,11 +127,33 @@ def upload_and_analyze():
         return jsonify({"error": "One or more files are missing filenames"}), 400
     
     # TODO: Get analysis settings from request
-    organization_id = 0 # the organization uploading the audio
-    agent_id = 0 # the agent heard in the audio
-    category_ids = [0] # the categories to score on
-    standard_id = 0 # the standard to compare to
-    question_ids = [0] # the questions to answer
+    organization_id = int(request.form.get('organization_id')) # the organization uploading the audio
+    agent_id = int(request.form.get('agent_id')) # the agent heard in the audio
+    standard_id = int(request.form.get('standard_id')) # the standard to compare to
+    # Scoring categories
+    category_ids_str = request.form.get('category_ids')
+    if category_ids_str:
+        category_ids_str = category_ids_str.split(',')
+        category_ids = [int(c) for c in category_ids_str]
+    else:
+        print("No scoring categories selected.")
+        category_ids = []
+    # Questions
+    question_ids_str = request.form.get('question_ids')
+    if question_ids_str:
+        question_ids_str = question_ids_str.split(',')
+        question_ids = [int(q) for q in question_ids_str]
+    else:
+        print("No questions selected.")
+        question_ids = []
+    # Debugging
+    print(f"""
+        organization_id: {type(organization_id)} {organization_id},
+        agent_id: {type(agent_id)} {agent_id},
+        standard_id: {type(standard_id)} {standard_id},
+        category_ids: {type(category_ids)} {category_ids},
+        question_ids: {type(question_ids)} {question_ids},
+    """)
 
     # Upload files to s3
     filenames = []
@@ -122,8 +166,9 @@ def upload_and_analyze():
 
     new_customer_interactions = []
     for filename in filenames:
+        start_transcription_job(filename)
         # Create new entry in the jobs table
-        customer_interaction_id = create_customer_interaction(filename, organization_id, agent_id)
+        customer_interaction_id = create_customer_interaction(filename, filename, organization_id, agent_id)
         new_customer_interactions.append(customer_interaction_id)
         # Send a job to SQS
         sqs.send_message(
@@ -136,6 +181,6 @@ def upload_and_analyze():
             })
         )
     
-    end_time = time.time()
-    print("time:", end_time - start_time)
+    # end_time = time.time()
+    # print("time:", end_time - start_time)
     return jsonify(new_customer_interactions), 200
