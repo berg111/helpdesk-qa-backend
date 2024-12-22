@@ -1,4 +1,5 @@
 import psycopg2
+import openai
 import json
 import time
 import os
@@ -6,6 +7,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 AWS_REGION = "us-west-2"
+openai.api_key = os.getenv('OPENAI_KEY')
 # s3 client
 S3_AUDIO_BUCKET_NAME = "customer-service-qa-audio"
 S3_TRANSCRIPT_BUCKET_NAME = "customer-service-qa-transcripts"
@@ -61,7 +63,19 @@ def lambda_handler(event, context):
     # print(cursor.fetchall())
     # cursor.close()
     # conn.close()
-    # return
+    messages = [
+        {"role": "system", "content": "You are a math tutor."},
+        {"role": "user", "content": "What is 1 + 1?"}
+    ]
+    # Make request to llm using prompt
+    MODEL = "gpt-4o-2024-08-06"
+    response = openai.chat.completions.create(
+        model=MODEL,
+        messages=messages
+    )
+    results_string = response.choices[0].message.content
+    print(results_string)
+    return
 
     for record in event['Records']:
         # Parse the SQS message
