@@ -147,13 +147,13 @@ def upload_and_analyze():
         print("No questions selected.")
         question_ids = []
     # Debugging
-    print(f"""
-        organization_id: {type(organization_id)} {organization_id},
-        agent_id: {type(agent_id)} {agent_id},
-        standard_id: {type(standard_id)} {standard_id},
-        category_ids: {type(category_ids)} {category_ids},
-        question_ids: {type(question_ids)} {question_ids},
-    """)
+    # print(f"""
+    #     organization_id: {type(organization_id)} {organization_id},
+    #     agent_id: {type(agent_id)} {agent_id},
+    #     standard_id: {type(standard_id)} {standard_id},
+    #     category_ids: {type(category_ids)} {category_ids},
+    #     question_ids: {type(question_ids)} {question_ids},
+    # """)
 
     # Upload files to s3
     filenames = []
@@ -167,7 +167,7 @@ def upload_and_analyze():
     new_customer_interactions = []
     for filename in filenames:
         start_transcription_job(filename)
-        # Create new entry in the jobs table
+        # Create new entry in the customer_interactions table
         customer_interaction_id = create_customer_interaction(filename, filename, organization_id, agent_id)
         new_customer_interactions.append(customer_interaction_id)
         # Send a job to SQS
