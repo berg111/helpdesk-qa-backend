@@ -38,13 +38,13 @@ class CustomerInteraction(Base):
     __tablename__ = 'customer_interactions'
     customer_interaction_id = Column(Integer, primary_key=True)
     organization_id = Column(Integer, ForeignKey('organizations.organization_id'), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.now())
     audio_filename = Column(String, nullable=False)
     transcript_filename = Column(String, nullable=False)
     analysis_filename = Column(String, nullable=False)
-    name = Column(String, default="")
     agent_id = Column(Integer, ForeignKey('agents.agent_id'))
+    name = Column(String, default="")
     status = Column(String, nullable=False)  # PENDING | IN PROGRESS | COMPLETED | FAILED
+    created_at = Column(DateTime, nullable=False, default=datetime.now())
 
 
 class Category(Base):

@@ -63,7 +63,7 @@ try:
     session.commit()
 
     # Add categories
-    category1 = Category(organization_id=org1.organization_id, name="Category 1", description="Description 1")
+    category1 = Category(organization_id=org1.organization_id, name="Category 1", description="Politeness")
     session.add(category1)
     session.commit()
 
@@ -73,7 +73,7 @@ try:
     session.commit()
 
     # Add standards
-    standard1 = Standard(organization_id=org1.organization_id, name="Receptionist", description="Expected behavior for receptionists")
+    standard1 = Standard(organization_id=org1.organization_id, name="IT Helpdesk", description="The agent should be attentive and solve the customer's problem.")
     session.add(standard1)
     session.commit()
 

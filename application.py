@@ -87,13 +87,45 @@ def upload_audio_to_s3(file, filename):
         raise e
     return unique_filename
 
-def create_customer_interaction(audio_filename, transcript_filename, organization_id, agent_id):
+def create_customer_interaction(audio_filename, transcript_filename, organization_id, agent_id, name=''):
     '''
     Create a new entry in the customer_interactions table in the DB and set processing 
     status to "PENDING".
     '''
-    # TODO
-    pass
+    # Create a session
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    try:
+        # Create a new CustomerInteraction instance
+        new_interaction = CustomerInteraction(
+            audio_filename=audio_filename,
+            transcript_filename=transcript_filename,
+            analysis_filename="PENDING",
+            organization_id=organization_id,
+            agent_id=agent_id,
+            name=name,
+            status="PENDING"  # Set initial status to PENDING
+        )
+
+        # Add the instance to the session
+        session.add(new_interaction)
+
+        # Commit the session to save changes
+        session.commit()
+        print(f"Customer interaction created with ID: {new_interaction.customer_interaction_id}")
+
+        # Return the ID of the created interaction
+        return new_interaction.customer_interaction_id
+
+    except Exception as e:
+        # Rollback in case of error
+        session.rollback()
+        print(f"An error occurred: {e}")
+
+    finally:
+        # Close the session
+        session.close()
 
 def start_transcription_job(filename):
     s3_audio_file_path = f"s3://{S3_AUDIO_BUCKET_NAME}/{filename}"
@@ -113,6 +145,27 @@ def start_transcription_job(filename):
     except Exception as e:
         print(filename, "failed to start transaction job:", e)
 
+def process_file_worker(audio_file, unique_filename, organization_id, agent_id, 
+                              category_ids, standard_id, question_ids, new_interaction_ids):
+    
+    _ = upload_audio_to_s3(audio_file, unique_filename)
+    _ = start_transcription_job(unique_filename)
+    customer_interaction_id = create_customer_interaction(unique_filename, unique_filename+".json", organization_id, agent_id)
+    new_interaction_ids.append(customer_interaction_id)
+    # Send a job to SQS
+    sqs.send_message(
+        QueueUrl=SQS_QUEUE_URL,
+        MessageBody=json.dumps({
+            "customer_interaction_id": customer_interaction_id,
+            "category_ids": category_ids,
+            "standard_id": standard_id,
+            "question_ids": question_ids,
+            "organization_id": organization_id
+        })
+    )
+    return
+
+
 @application.route('/upload-and-analyze', methods=['POST'])
 def upload_and_analyze():
     '''
@@ -126,7 +179,6 @@ def upload_and_analyze():
     if not files or any(file.filename == '' for file in files):
         return jsonify({"error": "One or more files are missing filenames"}), 400
     
-    # TODO: Get analysis settings from request
     organization_id = int(request.form.get('organization_id')) # the organization uploading the audio
     agent_id = int(request.form.get('agent_id')) # the agent heard in the audio
     standard_id = int(request.form.get('standard_id')) # the standard to compare to
@@ -155,32 +207,38 @@ def upload_and_analyze():
     #     question_ids: {type(question_ids)} {question_ids},
     # """)
 
-    # Upload files to s3
-    filenames = []
-    # Create a thread pool for concurrent uploads
+    # # Upload files to s3
+    # filenames = []
+    # # Create a thread pool for concurrent uploads
+    # with ThreadPoolExecutor(max_workers=10) as executor:
+    #     for file in files:
+    #         filename = generate_unique_filename(file.filename)
+    #         executor.submit(upload_audio_to_s3, file, filename)
+    #         filenames.append(filename)
+
+    # new_customer_interactions = []
+    # for filename in filenames:
+    #     start_transcription_job(filename)
+    #     # Create new entry in the customer_interactions table
+    #     customer_interaction_id = create_customer_interaction(filename, filename, organization_id, agent_id)
+    #     new_customer_interactions.append(customer_interaction_id)
+    #     # Send a job to SQS
+    #     sqs.send_message(
+    #         QueueUrl=SQS_QUEUE_URL,
+    #         MessageBody=json.dumps({
+    #             "customer_interaction_id": customer_interaction_id,
+    #             "category_ids": category_ids,
+    #             "standard_id": standard_id,
+    #             "question_ids": question_ids
+    #         })
+    #     )
+    new_interaction_ids = []
     with ThreadPoolExecutor(max_workers=10) as executor:
         for file in files:
-            filename = generate_unique_filename(file.filename)
-            executor.submit(upload_audio_to_s3, file, filename)
-            filenames.append(filename)
-
-    new_customer_interactions = []
-    for filename in filenames:
-        start_transcription_job(filename)
-        # Create new entry in the customer_interactions table
-        customer_interaction_id = create_customer_interaction(filename, filename, organization_id, agent_id)
-        new_customer_interactions.append(customer_interaction_id)
-        # Send a job to SQS
-        sqs.send_message(
-            QueueUrl=SQS_QUEUE_URL,
-            MessageBody=json.dumps({
-                "customer_interaction_id": customer_interaction_id,
-                "category_ids": category_ids,
-                "standard_id": standard_id,
-                "question_ids": question_ids
-            })
-        )
+            unique_filename = generate_unique_filename(file.filename)
+            executor.submit(process_file_worker, file, unique_filename,
+                            organization_id, agent_id, category_ids, standard_id, question_ids, new_interaction_ids)
     
     # end_time = time.time()
     # print("time:", end_time - start_time)
-    return jsonify(new_customer_interactions), 200
+    return jsonify(new_interaction_ids), 200
