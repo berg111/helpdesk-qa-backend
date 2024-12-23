@@ -17,7 +17,7 @@ from werkzeug.utils import secure_filename
 from concurrent.futures import ThreadPoolExecutor
 
 application = Flask(__name__)
-cors = CORS(application)
+cors = CORS(application) # TODO: Allow requests only from frontend. Something like CORS(app, resources={r"/*": {"origins": "https://your-frontend-domain.com"}})
 
 load_dotenv()
 # SOME_VAR = os.getenv('VAR_NAME')
@@ -171,7 +171,6 @@ def upload_and_analyze():
     '''
     Sends a job to worker
     '''
-    # start_time = time.time()
     # Get audio files from request
     if 'audio_files' not in request.files:
         return jsonify({"error": "No audio files provided"}), 400
@@ -198,47 +197,12 @@ def upload_and_analyze():
     else:
         print("No questions selected.")
         question_ids = []
-    # Debugging
-    # print(f"""
-    #     organization_id: {type(organization_id)} {organization_id},
-    #     agent_id: {type(agent_id)} {agent_id},
-    #     standard_id: {type(standard_id)} {standard_id},
-    #     category_ids: {type(category_ids)} {category_ids},
-    #     question_ids: {type(question_ids)} {question_ids},
-    # """)
 
-    # # Upload files to s3
-    # filenames = []
-    # # Create a thread pool for concurrent uploads
-    # with ThreadPoolExecutor(max_workers=10) as executor:
-    #     for file in files:
-    #         filename = generate_unique_filename(file.filename)
-    #         executor.submit(upload_audio_to_s3, file, filename)
-    #         filenames.append(filename)
-
-    # new_customer_interactions = []
-    # for filename in filenames:
-    #     start_transcription_job(filename)
-    #     # Create new entry in the customer_interactions table
-    #     customer_interaction_id = create_customer_interaction(filename, filename, organization_id, agent_id)
-    #     new_customer_interactions.append(customer_interaction_id)
-    #     # Send a job to SQS
-    #     sqs.send_message(
-    #         QueueUrl=SQS_QUEUE_URL,
-    #         MessageBody=json.dumps({
-    #             "customer_interaction_id": customer_interaction_id,
-    #             "category_ids": category_ids,
-    #             "standard_id": standard_id,
-    #             "question_ids": question_ids
-    #         })
-    #     )
     new_interaction_ids = []
     with ThreadPoolExecutor(max_workers=10) as executor:
         for file in files:
             unique_filename = generate_unique_filename(file.filename)
             executor.submit(process_file_worker, file, unique_filename,
                             organization_id, agent_id, category_ids, standard_id, question_ids, new_interaction_ids)
-    
-    # end_time = time.time()
-    # print("time:", end_time - start_time)
+
     return jsonify(new_interaction_ids), 200
