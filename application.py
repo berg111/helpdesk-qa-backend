@@ -1,22 +1,25 @@
 import os
-from flask import Flask, render_template, request, url_for, redirect, jsonify
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-import requests
 from dotenv import load_dotenv
 import json
-from textwrap import dedent
 import boto3
-import time
 from botocore.exceptions import ClientError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models import Base, CustomerInteraction
-from datetime import datetime
+from models import Base, CustomerInteraction, User
 import uuid
 from werkzeug.utils import secure_filename
 from concurrent.futures import ThreadPoolExecutor
+from flask_bcrypt import Bcrypt
+from flask_jwt_extended import (
+    JWTManager, create_access_token, jwt_required, get_jwt_identity
+)
 
 application = Flask(__name__)
+bcrypt = Bcrypt(application)
+application.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
+jwt = JWTManager(application)
 cors = CORS(application) # TODO: Allow requests only from frontend. Something like CORS(app, resources={r"/*": {"origins": "https://your-frontend-domain.com"}})
 
 load_dotenv()
@@ -65,6 +68,37 @@ Base.metadata.create_all(engine) # Create tables if they don't exist
 def index():
     return "index"
 
+@application.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
+    new_user = User(name=data['name'], email=data['email'], password=hashed_password)
+    
+    try:
+        with Session() as db_session:
+            db_session.add(new_user)
+            db_session.commit()
+            return jsonify({"message": "User registered successfully"}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@application.route('/login', methods=['POST'])
+def login():
+    with Session() as db_session:
+        data = request.json
+        user = db_session.query(User).filter_by(email=data['email']).first()
+
+        if user and bcrypt.check_password_hash(user.password, data['password']):
+            access_token = create_access_token(identity={"user_id": user.user_id, "email": user.email})
+            return jsonify({"access_token": access_token}), 200
+        return jsonify({"error": "Invalid credentials"}), 401
+
+@application.route('/whoami', methods=['GET'])
+@jwt_required()
+def whoami():
+    current_user = get_jwt_identity()
+    return jsonify({"logged_in_as": current_user}), 200
+
 def generate_unique_filename(original_filename):
     unique_id = str(uuid.uuid4())
     extension = original_filename.rsplit('.', 1)[-1]  # Get file extension
@@ -77,7 +111,6 @@ def upload_audio_to_s3(file, filename):
     '''
     unique_filename = generate_unique_filename(file.filename)
     unique_filename = filename
-    s3_file_path = f"s3://{S3_AUDIO_BUCKET_NAME}/{unique_filename}"
     # Upload file to S3
     try:
         print("Starting upload for:", filename)
@@ -93,7 +126,6 @@ def create_customer_interaction(audio_filename, transcript_filename, organizatio
     status to "PENDING".
     '''
     # Create a session
-    Session = sessionmaker(bind=engine)
     session = Session()
 
     try:

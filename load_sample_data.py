@@ -6,6 +6,8 @@ from models import (
     Base, Organization, OrganizationMember, User, Agent, CustomerInteraction, Category, CategoryScore,
     Standard, StandardComparison, Question, Answer, Summary, Sentiment, SilentPeriod, SpeakerMapping
 )
+from datetime import datetime
+from werkzeug.security import generate_password_hash
 
 # Create a session
 load_dotenv()
@@ -30,9 +32,24 @@ try:
     session.commit()
 
     # Add users
-    user1 = User(name="Alice")
-    user2 = User(name="Bob")
-    user3 = User(name="Charlie")
+    user1 = User(
+        email="testuser1@example.com",
+        hashed_password=generate_password_hash("password123"),
+        name="Test User 1",
+        is_active=True
+    )
+    user2 = User(
+        email="testuser2@example.com",
+        hashed_password=generate_password_hash("password456"),
+        name="Test User 2",
+        is_active=True
+    )
+    user3 = User(
+        email="testuser3@example.com",
+        hashed_password=generate_password_hash("password789"),
+        name="Test User 3",
+        is_active=True
+    )
     session.add_all([user1, user2, user3])
     session.commit()
 

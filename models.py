@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, ForeignKey, DateTime, Float, Text
+    Column, Integer, String, ForeignKey, DateTime, Float, Text, Boolean
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -15,8 +15,24 @@ class Organization(Base):
 
 class User(Base):
     __tablename__ = 'users'
-    user_id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)
+    
+    # Primary Key
+    user_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Authentication Fields
+    email = Column(String, unique=True, nullable=False)  # Unique email for login
+    hashed_password = Column(String, nullable=False)  # Securely stored password hash
+    
+    # User Details
+    name = Column(String, nullable=False)  # Optional, store user display name
+    is_active = Column(Boolean, default=True)  # Track if the user account is active
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.now(), nullable=False)  # When the user registered
+    updated_at = Column(DateTime, default=datetime.now(), onupdate=datetime.now(), nullable=False)
+
+    def __repr__(self):
+        return f"<User(user_id={self.user_id}, email={self.email}, name={self.name})>"
 
 
 class OrganizationMember(Base):
