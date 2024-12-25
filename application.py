@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
 import json
@@ -13,14 +13,22 @@ from werkzeug.utils import secure_filename
 from concurrent.futures import ThreadPoolExecutor
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import (
-    JWTManager, create_access_token, jwt_required, get_jwt_identity
+    JWTManager, create_access_token, jwt_required, get_jwt_identity, verify_jwt_in_request, set_access_cookies
 )
 
 application = Flask(__name__)
 bcrypt = Bcrypt(application)
 application.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
+application.config["JWT_TOKEN_LOCATION"] = ["cookies"]   # Use cookies for token storage
+application.config["JWT_ACCESS_COOKIE_NAME"] = "access_token"
+application.config["JWT_COOKIE_CSRF_PROTECT"] = False
 jwt = JWTManager(application)
-cors = CORS(application) # TODO: Allow requests only from frontend. Something like CORS(app, resources={r"/*": {"origins": "https://your-frontend-domain.com"}})
+CORS(application, 
+     supports_credentials=True, 
+     origins=["http://localhost:3000"], 
+     resources={r"/*": {"origins": "http://localhost:3000"}}
+)
+# cors = CORS(application) # TODO: Allow requests only from frontend. Something like CORS(app, resources={r"/*": {"origins": "https://your-frontend-domain.com"}})
 
 load_dotenv()
 # SOME_VAR = os.getenv('VAR_NAME')
@@ -64,6 +72,14 @@ engine = create_engine(DATABASE_URI)
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine) # Create tables if they don't exist
 
+@application.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000'  # Frontend origin
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    return response
+
 @application.route('/')
 def index():
     return "index"
@@ -72,7 +88,9 @@ def index():
 def register():
     data = request.json
     hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-    new_user = User(name=data['name'], email=data['email'], password=hashed_password)
+    email = data['email']
+    name = email.split("@")[0]
+    new_user = User(name=name, email=email, hashed_password=hashed_password)
     
     try:
         with Session() as db_session:
@@ -88,16 +106,31 @@ def login():
         data = request.json
         user = db_session.query(User).filter_by(email=data['email']).first()
 
-        if user and bcrypt.check_password_hash(user.password, data['password']):
-            access_token = create_access_token(identity={"user_id": user.user_id, "email": user.email})
-            return jsonify({"access_token": access_token}), 200
+        if user and bcrypt.check_password_hash(user.hashed_password, data['password']):
+            access_token = create_access_token(identity=str({"user_id": user.user_id, "email": user.email}))
+            response = make_response(jsonify({"message": "Login successful"}))
+            response.set_cookie(
+                "access_token",
+                access_token,
+                httponly=True,
+                secure=True,
+                samesite='None',
+                max_age=60*60,  # Set lifespan to 1 hour
+                path='/'
+            )
+            return response
         return jsonify({"error": "Invalid credentials"}), 401
 
 @application.route('/whoami', methods=['GET'])
 @jwt_required()
 def whoami():
-    current_user = get_jwt_identity()
-    return jsonify({"logged_in_as": current_user}), 200
+    try:
+        current_user = get_jwt_identity()
+        print(f"JWT Identity: {current_user}")  # Debugging
+        return jsonify({"logged_in_as": current_user}), 200
+    except Exception as e:
+        print(f"Error: {e}")  # Log errors for debugging
+        return jsonify({"error": "Unauthorized"}), 401
 
 def generate_unique_filename(original_filename):
     unique_id = str(uuid.uuid4())
