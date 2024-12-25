@@ -13,7 +13,8 @@ from werkzeug.utils import secure_filename
 from concurrent.futures import ThreadPoolExecutor
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import (
-    JWTManager, create_access_token, jwt_required, get_jwt_identity, verify_jwt_in_request, set_access_cookies
+    JWTManager, create_access_token, jwt_required, get_jwt_identity, 
+    verify_jwt_in_request, set_access_cookies, unset_jwt_cookies
 )
 
 application = Flask(__name__)
@@ -120,6 +121,21 @@ def login():
             )
             return response
         return jsonify({"error": "Invalid credentials"}), 401
+
+@application.route('/logout', methods=['POST'])
+@jwt_required()
+def logout():
+    response = make_response(jsonify({"message": "Login successful"}))
+    response.set_cookie(
+        "access_token",
+        "", # Empty (to delete basically)
+        httponly=True,
+        secure=True,
+        samesite='None',
+        max_age=0,
+        path='/'
+    )
+    return response
 
 @application.route('/whoami', methods=['GET'])
 @jwt_required()
