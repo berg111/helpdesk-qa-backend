@@ -150,3 +150,47 @@ class ReviewFlags(Base):
     review_flag = Column(Boolean, nullable=False)
     reason = Column(Text, nullable=False)
     was_reviewed = Column(Boolean, default=False, nullable=False)
+
+
+# Configurations Table
+class Configuration(Base):
+    __tablename__ = 'configurations'
+    configuration_id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey('organizations.organization_id'), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+
+    # Relationships to link configuration to questions, categories, and standards
+    questions = relationship('ConfigurationQuestion', back_populates='configuration')
+    categories = relationship('ConfigurationCategory', back_populates='configuration')
+    standard = relationship('ConfigurationStandard', back_populates='configuration', uselist=False)
+
+# ConfigurationQuestions Table
+class ConfigurationQuestion(Base):
+    __tablename__ = 'configuration_questions'
+    configuration_question_id = Column(Integer, primary_key=True)
+    configuration_id = Column(Integer, ForeignKey('configurations.configuration_id'), nullable=False)
+    question_id = Column(Integer, ForeignKey('questions.question_id'), nullable=False)
+
+    configuration = relationship('Configuration', back_populates='questions')
+    question = relationship('Question')
+
+# ConfigurationCategories Table
+class ConfigurationCategory(Base):
+    __tablename__ = 'configuration_categories'
+    configuration_category_id = Column(Integer, primary_key=True)
+    configuration_id = Column(Integer, ForeignKey('configurations.configuration_id'), nullable=False)
+    category_id = Column(Integer, ForeignKey('categories.category_id'), nullable=False)
+
+    configuration = relationship('Configuration', back_populates='categories')
+    category = relationship('Category')
+
+# ConfigurationStandards Table
+class ConfigurationStandard(Base):
+    __tablename__ = 'configuration_standards'
+    configuration_standard_id = Column(Integer, primary_key=True)
+    configuration_id = Column(Integer, ForeignKey('configurations.configuration_id'), nullable=False)
+    standard_id = Column(Integer, ForeignKey('standards.standard_id'), nullable=False)
+
+    configuration = relationship('Configuration', back_populates='standard')
+    standard = relationship('Standard')

@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from models import (
     Base, Organization, OrganizationMember, User, Agent, CustomerInteraction, Category, CategoryScore,
     Standard, StandardComparison, Question, Answer, Summary, Sentiment, SilentPeriod, SpeakerMapping,
-    ReviewFlags
+    ReviewFlags, Configuration, ConfigurationCategory, ConfigurationQuestion, ConfigurationStandard
 )
 from datetime import datetime
 from werkzeug.security import generate_password_hash
@@ -156,6 +156,23 @@ try:
     speaker_mapping2 = SpeakerMapping(customer_interaction_id=interaction1.customer_interaction_id, speaker_label="Speaker 2", role="Customer")
     session.add_all([speaker_mapping1, speaker_mapping2])
     session.commit()
+
+    # Add a config preset
+    new_configuration = Configuration(
+        organization_id=1,
+        name="Customer Feedback Configuration",
+        description="A configuration for analyzing customer feedback."
+    )
+    session.add(new_configuration)
+    session.commit()
+    # Add questions
+    session.add(ConfigurationQuestion(configuration_id=new_configuration.configuration_id, question_id=1))
+    # Add categories
+    session.add(ConfigurationCategory(configuration_id=new_configuration.configuration_id, category_id=1))
+    # Add standard
+    session.add(ConfigurationStandard(configuration_id=new_configuration.configuration_id, standard_id=1))
+    session.commit()
+
 
     print("Sample data loaded successfully!")
 
