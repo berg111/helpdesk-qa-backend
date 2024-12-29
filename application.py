@@ -382,7 +382,7 @@ def get_interaction(interaction_id):
 @jwt_required()
 def get_interactions_by_organization(organization_id):
     """
-    Fetch all customer interactions for a specific organization ID.
+    Fetch all customer interactions for a specific organization ID with pagination.
     """
     session = None
     try:
@@ -393,10 +393,20 @@ def get_interactions_by_organization(organization_id):
         if not authenticate_org_member(organization_id, user_id):
             return jsonify({"error": "Unauthorized"}), 401
 
+        # Get pagination parameters from the request
+        per_page = request.args.get('per_page', type=int, default=10)
+        page = request.args.get('page', type=int, default=1)
+
+        # Validate pagination parameters
+        if page < 1 or per_page < 1:
+            return jsonify({"error": "Invalid pagination parameters. Page and per_page must be greater than 0."}), 400
+
         # Query the database for interactions belonging to the organization
-        interactions = session.query(CustomerInteraction).filter_by(
-            organization_id=organization_id
-        ).all()
+        query = session.query(CustomerInteraction).filter_by(organization_id=organization_id)
+
+        # Pagination logic
+        total_count = query.count()
+        interactions = query.offset((page - 1) * per_page).limit(per_page).all()
 
         # Serialize interactions to JSON
         interactions_data = [
@@ -414,11 +424,140 @@ def get_interactions_by_organization(organization_id):
             for interaction in interactions
         ]
 
-        return jsonify(interactions_data), 200
+        return jsonify({
+            "total_count": total_count,
+            "page": page,
+            "per_page": per_page,
+            "results": interactions_data
+        }), 200
 
     except Exception as e:
         # Log the exception for debugging
         application.logger.error(f"Error fetching interactions: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+
+@application.route('/organizations/<int:organization_id>/interactions/filter', methods=['GET'])
+@jwt_required()
+def filter_customer_interactions(organization_id):
+    """
+    Filter customer interactions based on multiple criteria, including min and max scores for categories.
+    
+    request:
+        - agents (list of integers): Filter by agent IDs.
+        - category_scores (JSON string): Example: {"1": 8, "2": 5} (filter interactions where category 1 scored >= 8 and category 2 scored >= 5).
+        - question_answers (JSON string): Example: {"3": "Yes", "4": "No"} (filter interactions where question 3 has "Yes" and question 4 has "No").
+        - standards (list of integers): Filter by standard IDs.
+        - needs_review (boolean): Filter interactions flagged for review.
+        - per_page (integer): Number of results per page (default: 10).
+        - page (integer): Page number (default: 1)
+
+    example response:
+    {
+        "total_count": 42,
+        "page": 1,
+        "per_page": 10,
+        "results": [
+            {
+            "interaction_id": 1,
+            "agent_id": 3,
+            "status": "COMPLETED",
+            "created_at": "2024-12-23T12:00:00Z"
+            },
+            {
+            "interaction_id": 2,
+            "agent_id": 5,
+            "status": "COMPLETED",
+            "created_at": "2024-12-23T12:05:00Z"
+            }
+        ]
+    }
+
+    """
+    session = None
+    try:
+        session = Session()
+        user_id = get_current_user()['user_id']
+
+        # Check if the user is authorized to access this organization
+        if not authenticate_org_member(organization_id, user_id):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Get filter parameters from the request
+        agent_ids = request.args.getlist('agents')  # List of agent IDs
+        category_scores = request.args.get('category_scores', type=str)  # JSON string: {category_id: {"min": x, "max": y}}
+        question_answers = request.args.get('question_answers', type=str)  # JSON string: {question_id: answer}
+        standard_ids = request.args.getlist('standards')  # List of standard IDs
+        needs_review = request.args.get('needs_review', type=bool)  # Flag for review
+        per_page = request.args.get('per_page', type=int, default=10)
+        page = request.args.get('page', type=int, default=1)
+
+        # Build the query
+        query = session.query(CustomerInteraction).filter_by(organization_id=organization_id)
+
+        # Apply agent filter
+        if agent_ids:
+            query = query.filter(CustomerInteraction.agent_id.in_(agent_ids))
+
+        # Apply needs review filter
+        if needs_review:
+            query = query.join(ReviewFlags).filter(ReviewFlags.review_flag == True)
+
+        # Apply standards filter
+        if standard_ids:
+            query = query.join(StandardComparison).filter(StandardComparison.standard_id.in_(standard_ids))
+
+        # Apply question and answer filter
+        if question_answers:
+            question_answers = json.loads(question_answers)  # Parse JSON string
+            for question_id, answer in question_answers.items():
+                query = query.join(Answer).filter(
+                    Answer.question_id == question_id,
+                    Answer.answer == answer
+                )
+
+        # Apply category and score filter (min and max)
+        if category_scores:
+            category_scores = json.loads(category_scores)  # Parse JSON string
+            for category_id, score_range in category_scores.items():
+                min_score = score_range.get("min", 0)  # Default min: 0
+                max_score = score_range.get("max", 10)  # Default max: 10
+                query = query.join(CategoryScore).filter(
+                    CategoryScore.category_id == category_id,
+                    CategoryScore.score >= min_score,
+                    CategoryScore.score <= max_score
+                )
+
+        # Pagination
+        total_count = query.count()
+        interactions = query.offset((page - 1) * per_page).limit(per_page).all()
+
+        # Serialize results
+        results = [
+            {
+                "interaction_id": interaction.customer_interaction_id,
+                "agent_id": interaction.agent_id,
+                "status": interaction.status,
+                "created_at": interaction.created_at.isoformat(),
+                # Add more fields as needed
+            }
+            for interaction in interactions
+        ]
+
+        return jsonify({
+            "total_count": total_count,
+            "page": page,
+            "per_page": per_page,
+            "results": results
+        }), 200
+
+    except Exception as e:
+        application.logger.error(f"Error filtering customer interactions: {e}")
         return jsonify({"error": "An unexpected error occurred"}), 500
 
     finally:
