@@ -78,80 +78,8 @@ Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine) # Create tables if they don't exist
 
 
-@application.after_request
-def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = FRONTEND_URL  # Frontend origin
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-    return response
 
-@application.route('/')
-def index():
-    return "index"
-
-@application.route('/register', methods=['POST'])
-def register():
-    data = request.json
-    hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-    email = data['email']
-    name = email.split("@")[0]
-    new_user = User(name=name, email=email, hashed_password=hashed_password)
-    
-    try:
-        with Session() as db_session:
-            db_session.add(new_user)
-            db_session.commit()
-            return jsonify({"message": "User registered successfully"}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-@application.route('/login', methods=['POST'])
-def login():
-    with Session() as db_session:
-        data = request.json
-        user = db_session.query(User).filter_by(email=data['email']).first()
-
-        if user and bcrypt.check_password_hash(user.hashed_password, data['password']):
-            access_token = create_access_token(identity=str({"user_id": user.user_id, "email": user.email}))
-            response = make_response(jsonify({"message": "Login successful"}))
-            response.set_cookie(
-                "access_token",
-                access_token,
-                httponly=True,
-                secure=True,
-                samesite='None',
-                max_age=60*60,  # Set lifespan to 1 hour
-                path='/'
-            )
-            return response
-        return jsonify({"error": "Invalid credentials"}), 401
-
-@application.route('/logout', methods=['POST'])
-@jwt_required()
-def logout():
-    response = make_response(jsonify({"message": "Login successful"}))
-    response.set_cookie(
-        "access_token",
-        "", # Empty (to delete basically)
-        httponly=True,
-        secure=True,
-        samesite='None',
-        max_age=0,
-        path='/'
-    )
-    return response
-
-@application.route('/whoami', methods=['GET'])
-@jwt_required()
-def whoami():
-    try:
-        current_user = get_jwt_identity()
-        print(f"JWT Identity: {current_user}")  # Debugging
-        return jsonify({"logged_in_as": current_user}), 200
-    except Exception as e:
-        print(f"Error: {e}")  # Log errors for debugging
-        return jsonify({"error": "Unauthorized"}), 401
+################# HELPER FUNCTIONS #################
 
 def generate_unique_filename(original_filename):
     unique_id = str(uuid.uuid4())
@@ -251,12 +179,105 @@ def process_file_worker(audio_file, unique_filename, organization_id, agent_id,
     )
     return
 
+def get_current_user():
+    try:
+        current_user = get_jwt_identity()
+        return json.loads(current_user)
+    except Exception as e:
+        print(f"Error: {e}")  # Log errors for debugging
+        return jsonify({"error": "Unauthorized"}), 401
+
+################# APPLICATION ENDPOINTS #################
+
+@application.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = FRONTEND_URL  # Frontend origin
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    return response
+
+@application.route('/')
+def index():
+    return "index"
+
+@application.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
+    email = data['email']
+    name = email.split("@")[0]
+    new_user = User(name=name, email=email, hashed_password=hashed_password)
+    
+    try:
+        with Session() as db_session:
+            db_session.add(new_user)
+            db_session.commit()
+            return jsonify({"message": "User registered successfully"}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@application.route('/login', methods=['POST'])
+def login():
+    with Session() as db_session:
+        data = request.json
+        user = db_session.query(User).filter_by(email=data['email']).first()
+
+        if user and bcrypt.check_password_hash(user.hashed_password, data['password']):
+            identity = {
+                "user_id": user.user_id,
+                "email": user.email
+            }
+            access_token = create_access_token(identity=json.dumps(identity))
+            response = make_response(jsonify({"message": "Login successful"}))
+            response.set_cookie(
+                "access_token",
+                access_token,
+                httponly=True,
+                secure=True,
+                samesite='None',
+                max_age=60*60,  # Set lifespan to 1 hour
+                path='/'
+            )
+            return response
+        return jsonify({"error": "Invalid credentials"}), 401
+
+@application.route('/logout', methods=['POST'])
+@jwt_required()
+def logout():
+    response = make_response(jsonify({"message": "Login successful"}))
+    response.set_cookie(
+        "access_token",
+        "", # Empty (to delete basically)
+        httponly=True,
+        secure=True,
+        samesite='None',
+        max_age=0,
+        path='/'
+    )
+    return response
+
+@application.route('/whoami', methods=['GET'])
+@jwt_required()
+def whoami():
+    try:
+        current_user = get_current_user()
+        print(type(current_user), current_user['user_id'], current_user['email'])
+        return jsonify({"logged_in_as": current_user}), 200
+    except Exception as e:
+        print(f"Error: {e}")  # Log errors for debugging
+        return jsonify({"error": "Unauthorized"}), 401
+    
 
 @application.route('/upload-and-analyze', methods=['POST'])
+@jwt_required()
 def upload_and_analyze():
     '''
     Sends a job to worker
     '''
+    current_user = get_current_user()
+    print(type(current_user), current_user)
+    return
     # Get audio files from request
     if 'audio_files' not in request.files:
         return jsonify({"error": "No audio files provided"}), 400
@@ -292,3 +313,4 @@ def upload_and_analyze():
                             organization_id, agent_id, category_ids, standard_id, question_ids, new_interaction_ids)
 
     return jsonify(new_interaction_ids), 200
+
