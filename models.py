@@ -141,3 +141,12 @@ class SpeakerMapping(Base):
     customer_interaction_id = Column(Integer, ForeignKey('customer_interactions.customer_interaction_id'), nullable=False)
     speaker_label = Column(String, nullable=False)
     role = Column(String, nullable=False)  # Agent | Customer
+
+
+class ReviewFlags(Base):
+    __tablename__ = 'review_flags'
+    review_flag_id = Column(Integer, primary_key=True)
+    customer_interaction_id = Column(Integer, ForeignKey('customer_interactions.customer_interaction_id'), nullable=False)
+    review_flag = Column(Boolean, nullable=False)
+    reason = Column(Text, nullable=False)
+    was_reviewed = Column(Boolean, nullable=False)

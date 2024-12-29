@@ -4,7 +4,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from models import (
     Base, Organization, OrganizationMember, User, Agent, CustomerInteraction, Category, CategoryScore,
-    Standard, StandardComparison, Question, Answer, Summary, Sentiment, SilentPeriod, SpeakerMapping
+    Standard, StandardComparison, Question, Answer, Summary, Sentiment, SilentPeriod, SpeakerMapping,
+    ReviewFlags
 )
 from datetime import datetime
 from werkzeug.security import generate_password_hash
@@ -76,7 +77,32 @@ try:
         agent_id=agent1.agent_id,
         status="COMPLETED"
     )
-    session.add(interaction1)
+    interaction2 = CustomerInteraction(
+        organization_id=org1.organization_id,
+        audio_filename="audio2.mp3",
+        transcript_filename="transcript2.json",
+        analysis_filename="analysis2.json",
+        name="Interaction 2",
+        agent_id=agent1.agent_id,
+        status="COMPLETED"
+    )
+    session.add(interaction2)
+    session.commit()
+
+    # Add sample review flags
+    review_flag1 = ReviewFlags(
+        customer_interaction_id=1,
+        review_flag=True,
+        reason="Agent did not follow the script",
+        was_reviewed=False
+    )
+    review_flag2 = ReviewFlags(
+        customer_interaction_id=2,
+        review_flag=False,
+        reason="Interaction met all standards",
+        was_reviewed=False
+    )
+    session.add_all([review_flag1, review_flag2])
     session.commit()
 
     # Add categories
