@@ -936,7 +936,7 @@ def get_recent_scores_by_organization_and_category(organization_id, category_id,
             return jsonify({"error": "Unauthorized"}), 401
 
         # Calculate the time threshold
-        time_threshold = datetime.utcnow() - timedelta(minutes=minutes)
+        time_threshold = datetime.now() - timedelta(minutes=minutes)
 
         # Query the database for scores
         scores = (
@@ -993,7 +993,7 @@ def get_recent_answers_by_organization_and_question(organization_id, question_id
             return jsonify({"error": "Unauthorized"}), 401
 
         # Calculate the time threshold
-        time_threshold = datetime.utcnow() - timedelta(minutes=minutes)
+        time_threshold = datetime.now() - timedelta(minutes=minutes)
 
         # Query the database for answers
         answers = (
