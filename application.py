@@ -17,22 +17,26 @@ from flask_jwt_extended import (
     verify_jwt_in_request, set_access_cookies, unset_jwt_cookies
 )
 
+load_dotenv()
+
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+
 application = Flask(__name__)
+
+# JWT and Auth
 bcrypt = Bcrypt(application)
 application.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
 application.config["JWT_TOKEN_LOCATION"] = ["cookies"]   # Use cookies for token storage
 application.config["JWT_ACCESS_COOKIE_NAME"] = "access_token"
 application.config["JWT_COOKIE_CSRF_PROTECT"] = False
 jwt = JWTManager(application)
+
+# CORS
 CORS(application, 
      supports_credentials=True, 
-     origins=["http://localhost:3000"], 
-     resources={r"/*": {"origins": "http://localhost:3000"}}
+     origins=[FRONTEND_URL], 
+     resources={r"/*": {"origins": FRONTEND_URL}}
 )
-# cors = CORS(application) # TODO: Allow requests only from frontend. Something like CORS(app, resources={r"/*": {"origins": "https://your-frontend-domain.com"}})
-
-load_dotenv()
-# SOME_VAR = os.getenv('VAR_NAME')
 
 # Configure AWS Resources
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
@@ -73,9 +77,10 @@ engine = create_engine(DATABASE_URI)
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine) # Create tables if they don't exist
 
+
 @application.after_request
 def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000'  # Frontend origin
+    response.headers['Access-Control-Allow-Origin'] = FRONTEND_URL  # Frontend origin
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'

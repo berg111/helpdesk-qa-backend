@@ -86,6 +86,7 @@ try:
         agent_id=agent1.agent_id,
         status="COMPLETED"
     )
+    session.add(interaction1)
     session.add(interaction2)
     session.commit()
 
