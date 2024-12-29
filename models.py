@@ -149,4 +149,4 @@ class ReviewFlags(Base):
     customer_interaction_id = Column(Integer, ForeignKey('customer_interactions.customer_interaction_id'), nullable=False)
     review_flag = Column(Boolean, nullable=False)
     reason = Column(Text, nullable=False)
-    was_reviewed = Column(Boolean, nullable=False)
+    was_reviewed = Column(Boolean, default=False, nullable=False)
