@@ -262,7 +262,7 @@ def login():
                 "access_token",
                 access_token,
                 httponly=True,
-                secure=False, # TODO This should be True in prod
+                secure=True,
                 samesite='None',
                 max_age=60*60,  # Set lifespan to 1 hour
                 path='/'
