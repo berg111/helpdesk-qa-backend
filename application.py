@@ -213,7 +213,22 @@ def add_cors_headers(response):
 
 @application.route('/')
 def index():
-    return "index"
+    """
+    Return a simple HTML response with a welcome message.
+    """
+    return """
+    <!DOCTYPE html>
+    <html>
+        <head>
+            <title>Welcome</title>
+        </head>
+        <body>
+            <h1>Welcome to the API!</h1>
+            <p>Use the API endpoints to interact with the application.</p>
+        </body>
+    </html>
+    """, 200
+
 
 @application.route('/register', methods=['POST'])
 def register():
