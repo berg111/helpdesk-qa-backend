@@ -19,8 +19,7 @@ from werkzeug.utils import secure_filename
 from concurrent.futures import ThreadPoolExecutor
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import (
-    JWTManager, create_access_token, jwt_required, get_jwt_identity, 
-    verify_jwt_in_request, set_access_cookies, unset_jwt_cookies
+    JWTManager, create_access_token, jwt_required, get_jwt_identity
 )
 from datetime import datetime, timedelta
 

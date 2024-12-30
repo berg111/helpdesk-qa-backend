@@ -1,5 +1,6 @@
 annotated-types==0.7.0
 anyio==4.6.2.post1
+bcrypt==4.2.1
 blinker==1.9.0
 boto3==1.35.75
 botocore==1.35.75
@@ -8,7 +9,9 @@ charset-normalizer==3.4.0
 click==8.1.7
 distro==1.9.0
 Flask==3.1.0
+Flask-Bcrypt==1.0.1
 Flask-Cors==5.0.0
+Flask-JWT-Extended==4.7.1
 h11==0.14.0
 httpcore==1.0.7
 httpx==0.28.0
@@ -22,6 +25,7 @@ openai==1.55.3
 psycopg2-binary==2.9.10
 pydantic==2.10.2
 pydantic_core==2.27.1
+PyJWT==2.10.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 requests==2.32.3
