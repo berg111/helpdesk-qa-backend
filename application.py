@@ -2052,3 +2052,48 @@ def get_agent_questions_and_answers_in_last_x_minutes(organization_id, agent_id)
     finally:
         if session:
             session.close()
+
+
+@application.route('/users/<int:user_id>/organizations', methods=['GET'])
+@jwt_required()
+def get_organizations_for_user(user_id):
+    """
+    Fetch all organizations associated with a specific user.
+    """
+    session = None
+    try:
+        session = Session()
+
+        # Get the current user's ID from the JWT
+        current_user_id = get_current_user()['user_id']
+
+        # Ensure the user is fetching their own data
+        if current_user_id != user_id:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Query the database for organizations associated with the user
+        organizations = session.query(Organization).join(
+            OrganizationMember, Organization.organization_id == OrganizationMember.organization_id
+        ).filter(OrganizationMember.user_id == user_id).all()
+
+        # Serialize the results
+        organizations_data = [
+            {
+                "organization_id": org.organization_id,
+                "name": org.name
+            }
+            for org in organizations
+        ]
+
+        return jsonify({
+            "user_id": user_id,
+            "organizations": organizations_data
+        }), 200
+
+    except Exception as e:
+        application.logger.error(f"Error fetching organizations for user: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
