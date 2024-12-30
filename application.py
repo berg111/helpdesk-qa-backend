@@ -22,6 +22,7 @@ from flask_jwt_extended import (
     JWTManager, create_access_token, jwt_required, get_jwt_identity, 
     verify_jwt_in_request, set_access_cookies, unset_jwt_cookies
 )
+from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -566,6 +567,214 @@ def filter_customer_interactions(organization_id):
             session.close()
 
 
+@application.route('/organizations/<int:organization_id>/interactions/<int:interaction_id>/questions-answers', methods=['GET'])
+@jwt_required()
+def get_questions_and_answers(organization_id, interaction_id):
+    """
+    Fetch all questions and their corresponding answers for a specific customer interaction.
+    """
+    session = None
+    try:
+        session = Session()
+        user_id = get_current_user()['user_id']
+
+        # Check if the user is authorized to access this organization
+        if not authenticate_org_member(organization_id, user_id):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Check if the interaction exists
+        interaction = session.query(CustomerInteraction).filter_by(
+            customer_interaction_id=interaction_id,
+            organization_id=organization_id
+        ).one_or_none()
+
+        if not interaction:
+            return jsonify({"error": "Interaction not found"}), 404
+
+        # Fetch the questions and answers associated with the interaction
+        questions_answers = session.query(Question, Answer).join(Answer).filter(
+            Answer.customer_interaction_id == interaction_id,
+            Question.organization_id == organization_id
+        ).all()
+
+        # Serialize the results
+        questions_answers_data = [
+            {
+                "question_id": question.question_id,
+                "question": question.question,
+                "answer_id": answer.answer_id,
+                "answer": answer.answer
+            }
+            for question, answer in questions_answers
+        ]
+
+        return jsonify(questions_answers_data), 200
+
+    except Exception as e:
+        application.logger.error(f"Error fetching questions and answers: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+@application.route('/organizations/<int:organization_id>/interactions/<int:interaction_id>/category-scores', methods=['GET'])
+@jwt_required()
+def get_category_scores(organization_id, interaction_id):
+    """
+    Fetch all category scores for a specific customer interaction.
+    """
+    session = None
+    try:
+        session = Session()
+        user_id = get_current_user()['user_id']
+
+        # Check if the user is authorized to access this organization
+        if not authenticate_org_member(organization_id, user_id):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Check if the interaction exists
+        interaction = session.query(CustomerInteraction).filter_by(
+            customer_interaction_id=interaction_id,
+            organization_id=organization_id
+        ).one_or_none()
+
+        if not interaction:
+            return jsonify({"error": "Interaction not found"}), 404
+
+        # Fetch the category scores for the interaction
+        category_scores = session.query(Category, CategoryScore).join(CategoryScore).filter(
+            CategoryScore.customer_interaction_id == interaction_id,
+            Category.organization_id == organization_id
+        ).all()
+
+        # Serialize the results
+        category_scores_data = [
+            {
+                "category_id": category.category_id,
+                "category_name": category.name,
+                "score": category_score.score
+            }
+            for category, category_score in category_scores
+        ]
+
+        return jsonify(category_scores_data), 200
+
+    except Exception as e:
+        application.logger.error(f"Error fetching category scores: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+@application.route('/organizations/<int:organization_id>/interactions/<int:interaction_id>/summary', methods=['GET'])
+@jwt_required()
+def get_interaction_summary(organization_id, interaction_id):
+    """
+    Fetch the summary for a specific customer interaction.
+    """
+    session = None
+    try:
+        session = Session()
+        user_id = get_current_user()['user_id']
+
+        # Check if the user is authorized to access this organization
+        if not authenticate_org_member(organization_id, user_id):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Check if the interaction exists
+        interaction = session.query(CustomerInteraction).filter_by(
+            customer_interaction_id=interaction_id,
+            organization_id=organization_id
+        ).one_or_none()
+
+        if not interaction:
+            return jsonify({"error": "Interaction not found"}), 404
+
+        # Fetch the summary for the interaction
+        summary = session.query(Summary).filter_by(
+            customer_interaction_id=interaction_id,
+            organization_id=organization_id
+        ).one_or_none()
+
+        if not summary:
+            return jsonify({"error": "Summary not found"}), 404
+
+        # Serialize the summary
+        summary_data = {
+            "summary_id": summary.summary_id,
+            "interaction_id": summary.customer_interaction_id,
+            "organization_id": summary.organization_id,
+            "summary_text": summary.summary
+        }
+
+        return jsonify(summary_data), 200
+
+    except Exception as e:
+        application.logger.error(f"Error fetching interaction summary: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+@application.route('/organizations/<int:organization_id>/interactions/<int:interaction_id>/standard-comparison', methods=['GET'])
+@jwt_required()
+def get_standard_comparison(organization_id, interaction_id):
+    """
+    Fetch the standard comparison for a specific customer interaction.
+    """
+    session = None
+    try:
+        session = Session()
+        user_id = get_current_user()['user_id']
+
+        # Check if the user is authorized to access this organization
+        if not authenticate_org_member(organization_id, user_id):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Check if the interaction exists
+        interaction = session.query(CustomerInteraction).filter_by(
+            customer_interaction_id=interaction_id,
+            organization_id=organization_id
+        ).one_or_none()
+
+        if not interaction:
+            return jsonify({"error": "Interaction not found"}), 404
+
+        # Fetch the standard comparison for the interaction
+        standard_comparison = session.query(StandardComparison).filter_by(
+            customer_interaction_id=interaction_id
+        ).one_or_none()
+
+        if not standard_comparison:
+            return jsonify({"error": "Standard comparison not found"}), 404
+
+        # Serialize the standard comparison
+        comparison_data = {
+            "standard_comparison_id": standard_comparison.standard_comparison_id,
+            "interaction_id": standard_comparison.customer_interaction_id,
+            "standard_id": standard_comparison.standard_id,
+            "comparison_text": standard_comparison.comparison
+        }
+
+        return jsonify(comparison_data), 200
+
+    except Exception as e:
+        application.logger.error(f"Error fetching standard comparison: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+
+
 @application.route('/organizations/<int:organization_id>/interactions/flagged', methods=['GET'])
 @jwt_required()
 def get_flagged_interactions_by_organization(organization_id):
@@ -629,8 +838,6 @@ def get_flagged_interactions_by_organization(organization_id):
         if session:
             session.close()
 
-
-from datetime import datetime, timedelta
 
 @application.route('/organizations/<int:organization_id>/interactions/recent/<int:minutes>', methods=['GET'])
 @jwt_required()
@@ -1514,10 +1721,10 @@ def delete_standard(organization_id, standard_id):
 
 @application.route('/organizations/<int:organization_id>/interactions/<int:interaction_id>/segments', methods=['GET'])
 @jwt_required()
-def get_audio_segments_with_speaker_labels_and_silent_periods(organization_id, interaction_id):
+def get_audio_segments_with_speaker_labels_sentiments_and_silent_periods(organization_id, interaction_id):
     """
     Retrieve audio segments from S3, map the speaker labels using the speaker_labels table,
-    and include silent periods from the silent_periods table.
+    include sentiments for each segment, and silent periods from the silent_periods table.
     Ensure the interaction is in the 'COMPLETED' state.
     """
     session = None
@@ -1556,7 +1763,13 @@ def get_audio_segments_with_speaker_labels_and_silent_periods(organization_id, i
             application.logger.error(f"Error fetching transcript from S3: {e}")
             return jsonify({"error": "Unable to fetch transcript from S3"}), 500
 
-        # Update speaker labels in the transcript data
+        # Fetch sentiments for the interaction
+        sentiments = session.query(Sentiment).filter_by(
+            customer_interaction_id=interaction_id
+        ).all()
+        sentiment_map = {sentiment.segment_id: sentiment.sentiment for sentiment in sentiments}
+
+        # Update speaker labels and add sentiments in the transcript data
         updated_segments = []
         for segment in transcript_data.get('audio_segments', []):
             updated_segments.append({
@@ -1564,7 +1777,8 @@ def get_audio_segments_with_speaker_labels_and_silent_periods(organization_id, i
                 "start_time": segment['start_time'],
                 "end_time": segment['end_time'],
                 "transcript": segment['transcript'],
-                "speaker_label": speaker_map.get(segment['speaker_label'], segment['speaker_label'])
+                "speaker_label": speaker_map.get(segment['speaker_label'], segment['speaker_label']),
+                "sentiment": sentiment_map.get(segment['id'], "Unknown")  # Default to "Unknown" if sentiment not found
             })
 
         # Fetch silent periods from the silent_periods table
@@ -1596,6 +1810,7 @@ def get_audio_segments_with_speaker_labels_and_silent_periods(organization_id, i
     finally:
         if session:
             session.close()
+
 
 
 @application.route('/organizations/<int:organization_id>/interactions/<int:interaction_id>/download', methods=['GET'])
@@ -1643,6 +1858,195 @@ def download_audio_file(organization_id, interaction_id):
 
     except Exception as e:
         application.logger.error(f"Error handling audio download: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+##### Agents page #####
+
+@application.route('/organizations/<int:organization_id>/agents/<int:agent_id>/interactions', methods=['GET'])
+@jwt_required()
+def get_agent_interactions_in_last_x_minutes(organization_id, agent_id):
+    """
+    Fetch customer interactions for a specific agent from the last X minutes.
+    """
+    session = None
+    try:
+        session = Session()
+        user_id = get_current_user()['user_id']
+
+        # Check if the user is authorized to access this organization
+        if not authenticate_org_member(organization_id, user_id):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Get the 'minutes' parameter from the query string
+        minutes = request.args.get('minutes', type=int)
+        if not minutes or minutes <= 0:
+            return jsonify({"error": "'minutes' must be a positive integer"}), 400
+
+        # Calculate the time range
+        cutoff_time = datetime.now() - timedelta(minutes=minutes)
+
+        # Query the database for interactions associated with the agent in the given time range
+        interactions = session.query(CustomerInteraction).filter(
+            CustomerInteraction.organization_id == organization_id,
+            CustomerInteraction.agent_id == agent_id,
+            CustomerInteraction.created_at >= cutoff_time
+        ).all()
+
+        # Serialize the interactions
+        interactions_data = [
+            {
+                "customer_interaction_id": interaction.customer_interaction_id,
+                "organization_id": interaction.organization_id,
+                "agent_id": interaction.agent_id,
+                "audio_filename": interaction.audio_filename,
+                "transcript_filename": interaction.transcript_filename,
+                "analysis_filename": interaction.analysis_filename,
+                "name": interaction.name,
+                "status": interaction.status,
+                "created_at": interaction.created_at.isoformat()  # Convert datetime to string
+            }
+            for interaction in interactions
+        ]
+
+        return jsonify({
+            "agent_id": agent_id,
+            "organization_id": organization_id,
+            "time_range": f"Last {minutes} minutes",
+            "interactions": interactions_data
+        }), 200
+
+    except Exception as e:
+        application.logger.error(f"Error fetching interactions for agent: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+@application.route('/organizations/<int:organization_id>/agents/<int:agent_id>/category-scores', methods=['GET'])
+@jwt_required()
+def get_agent_category_scores_in_last_x_minutes(organization_id, agent_id):
+    """
+    Fetch category scores for a specific agent from the last X minutes.
+    """
+    session = None
+    try:
+        session = Session()
+        user_id = get_current_user()['user_id']
+
+        # Check if the user is authorized to access this organization
+        if not authenticate_org_member(organization_id, user_id):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Get the 'minutes' parameter from the query string
+        minutes = request.args.get('minutes', type=int)
+        if not minutes or minutes <= 0:
+            return jsonify({"error": "'minutes' must be a positive integer"}), 400
+
+        # Calculate the time range
+        cutoff_time = datetime.now() - timedelta(minutes=minutes)
+
+        # Query the database for category scores associated with the agent in the given time range
+        category_scores = session.query(Category, CategoryScore, CustomerInteraction).join(
+            CategoryScore, Category.category_id == CategoryScore.category_id
+        ).join(
+            CustomerInteraction, CustomerInteraction.customer_interaction_id == CategoryScore.customer_interaction_id
+        ).filter(
+            CustomerInteraction.organization_id == organization_id,
+            CustomerInteraction.agent_id == agent_id,
+            CustomerInteraction.created_at >= cutoff_time
+        ).all()
+
+        # Serialize the results
+        category_scores_data = [
+            {
+                "category_id": category.category_id,
+                "category_name": category.name,
+                "score": category_score.score,
+                "interaction_id": interaction.customer_interaction_id,
+                "interaction_created_at": interaction.created_at.isoformat()
+            }
+            for category, category_score, interaction in category_scores
+        ]
+
+        return jsonify({
+            "agent_id": agent_id,
+            "organization_id": organization_id,
+            "time_range": f"Last {minutes} minutes",
+            "category_scores": category_scores_data
+        }), 200
+
+    except Exception as e:
+        application.logger.error(f"Error fetching category scores for agent: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+@application.route('/organizations/<int:organization_id>/agents/<int:agent_id>/questions-answers', methods=['GET'])
+@jwt_required()
+def get_agent_questions_and_answers_in_last_x_minutes(organization_id, agent_id):
+    """
+    Fetch questions and their answers for a specific agent from the last X minutes.
+    """
+    session = None
+    try:
+        session = Session()
+        user_id = get_current_user()['user_id']
+
+        # Check if the user is authorized to access this organization
+        if not authenticate_org_member(organization_id, user_id):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Get the 'minutes' parameter from the query string
+        minutes = request.args.get('minutes', type=int)
+        if not minutes or minutes <= 0:
+            return jsonify({"error": "'minutes' must be a positive integer"}), 400
+
+        # Calculate the time range
+        cutoff_time = datetime.now() - timedelta(minutes=minutes)
+
+        # Query the database for questions and answers associated with the agent in the given time range
+        questions_answers = session.query(Question, Answer, CustomerInteraction).join(
+            Answer, Question.question_id == Answer.question_id
+        ).join(
+            CustomerInteraction, CustomerInteraction.customer_interaction_id == Answer.customer_interaction_id
+        ).filter(
+            CustomerInteraction.organization_id == organization_id,
+            CustomerInteraction.agent_id == agent_id,
+            CustomerInteraction.created_at >= cutoff_time
+        ).all()
+
+        # Serialize the results
+        questions_answers_data = [
+            {
+                "question_id": question.question_id,
+                "question_text": question.question,
+                "answer_id": answer.answer_id,
+                "answer_text": answer.answer,
+                "interaction_id": interaction.customer_interaction_id,
+                "interaction_created_at": interaction.created_at.isoformat()
+            }
+            for question, answer, interaction in questions_answers
+        ]
+
+        return jsonify({
+            "agent_id": agent_id,
+            "organization_id": organization_id,
+            "time_range": f"Last {minutes} minutes",
+            "questions_answers": questions_answers_data
+        }), 200
+
+    except Exception as e:
+        application.logger.error(f"Error fetching questions and answers for agent: {e}")
         return jsonify({"error": "An unexpected error occurred"}), 500
 
     finally:
