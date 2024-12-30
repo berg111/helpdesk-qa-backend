@@ -1,5 +1,6 @@
 import os
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify, make_response, send_file
+import io
 from flask_cors import CORS
 from dotenv import load_dotenv
 import json
@@ -1545,7 +1546,6 @@ def get_audio_segments_with_speaker_labels_and_silent_periods(organization_id, i
         speaker_map = {mapping.speaker_label: mapping.role for mapping in speaker_mappings}
 
         # Retrieve the transcript from S3
-        s3_client = boto3.client('s3')
         try:
             s3_object = s3_client.get_object(
                 Bucket=S3_TRANSCRIPT_BUCKET_NAME, Key=interaction.transcript_filename
@@ -1591,6 +1591,58 @@ def get_audio_segments_with_speaker_labels_and_silent_periods(organization_id, i
 
     except Exception as e:
         application.logger.error(f"Error processing request: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+@application.route('/organizations/<int:organization_id>/interactions/<int:interaction_id>/download', methods=['GET'])
+@jwt_required()
+def download_audio_file(organization_id, interaction_id):
+    """
+    Download the audio file for a specific interaction.
+    """
+    session = None
+    try:
+        session = Session()
+        user_id = get_current_user()['user_id']
+
+        # Check if the user is authorized to access this organization
+        if not authenticate_org_member(organization_id, user_id):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Fetch the interaction
+        interaction = session.query(CustomerInteraction).filter_by(
+            customer_interaction_id=interaction_id,
+            organization_id=organization_id
+        ).one_or_none()
+
+        if not interaction:
+            return jsonify({"error": "Interaction not found"}), 404
+
+        # Retrieve the audio file from S3
+        try:
+            audio_object = s3_client.get_object(
+                Bucket=S3_AUDIO_BUCKET_NAME,
+                Key=interaction.audio_filename
+            )
+            content_type = audio_object['ContentType']  # Retrieve the MIME type from S3
+        except ClientError as e:
+            application.logger.error(f"Error fetching audio file from S3: {e}")
+            return jsonify({"error": "Unable to fetch audio file"}), 500
+
+        # Send the audio file to the client
+        return send_file(
+            io.BytesIO(audio_object['Body'].read()),
+            mimetype=content_type,  # Use MIME type from S3
+            as_attachment=True,
+            download_name=interaction.audio_filename
+        )
+
+    except Exception as e:
+        application.logger.error(f"Error handling audio download: {e}")
         return jsonify({"error": "An unexpected error occurred"}), 500
 
     finally:
