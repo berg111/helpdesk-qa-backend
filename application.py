@@ -2111,3 +2111,55 @@ def get_organizations_for_user(user_id):
     finally:
         if session:
             session.close()
+
+
+@application.route('/organizations/<int:organization_id>/members', methods=['GET'])
+@jwt_required()
+def get_members_for_organization(organization_id):
+    """
+    Fetch all members associated with a specific organization.
+    """
+    session = None
+    try:
+        session = Session()
+
+        # Get the current user's ID from the JWT
+        current_user_id = get_current_user()['user_id']
+
+        # Verify the user is a member of the organization
+        is_member = session.query(OrganizationMember).filter_by(
+            organization_id=organization_id,
+            user_id=current_user_id
+        ).first()
+
+        if not is_member:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Query the database for members of the organization
+        members = session.query(User, OrganizationMember).join(
+            OrganizationMember, User.user_id == OrganizationMember.user_id
+        ).filter(OrganizationMember.organization_id == organization_id).all()
+
+        # Serialize the results
+        members_data = [
+            {
+                "user_id": user.user_id,
+                "name": user.name,
+                "email": user.email,  # Assuming the User model includes an email field
+                "role": org_member.role  # "admin" or "member"
+            }
+            for user, org_member in members
+        ]
+
+        return jsonify({
+            "organization_id": organization_id,
+            "members": members_data
+        }), 200
+
+    except Exception as e:
+        application.logger.error(f"Error fetching members for organization: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
