@@ -2275,3 +2275,52 @@ def add_user_to_organization(organization_id):
     finally:
         if session:
             session.close()
+
+
+@application.route('/organizations', methods=['POST'])
+@jwt_required()
+def create_organization():
+    """
+    Create a new organization and assign the calling user as the 'owner'.
+    """
+    session = None
+    try:
+        session = Session()
+
+        # Get the current user's ID from the JWT
+        current_user_id = get_current_user()['user_id']
+
+        # Parse the request body
+        data = request.get_json()
+        organization_name = data.get("name")
+
+        # Validate input
+        if not organization_name:
+            return jsonify({"error": "Missing required field: name"}), 400
+
+        # Create the new organization
+        new_organization = Organization(name=organization_name)
+        session.add(new_organization)
+        session.commit()  # Commit to generate the organization ID
+
+        # Add the current user as the 'owner' of the organization
+        owner_member = OrganizationMember(
+            organization_id=new_organization.organization_id,
+            user_id=current_user_id,
+            role="owner"
+        )
+        session.add(owner_member)
+        session.commit()
+
+        return jsonify({
+            "message": f"Organization '{organization_name}' created successfully.",
+            "organization_id": new_organization.organization_id
+        }), 201
+
+    except Exception as e:
+        application.logger.error(f"Error creating organization: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
