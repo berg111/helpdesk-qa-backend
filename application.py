@@ -2163,3 +2163,115 @@ def get_members_for_organization(organization_id):
     finally:
         if session:
             session.close()
+
+
+@application.route('/organizations/<int:organization_id>/members/<int:user_id>', methods=['DELETE'])
+@jwt_required()
+def remove_user_from_organization(organization_id, user_id):
+    """
+    Remove a user from a specific organization.
+    """
+    session = None
+    try:
+        session = Session()
+
+        # Get the current user's ID and role from the JWT
+        current_user_id = get_current_user()['user_id']
+
+        # Check if the current user is an admin of the organization
+        current_user_role = session.query(OrganizationMember).filter_by(
+            organization_id=organization_id,
+            user_id=current_user_id
+        ).first()
+
+        if not current_user_role or current_user_role.role != 'admin':
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Ensure the user to be removed exists in the organization
+        user_to_remove = session.query(OrganizationMember).filter_by(
+            organization_id=organization_id,
+            user_id=user_id
+        ).first()
+
+        if not user_to_remove:
+            return jsonify({"error": "User not found in the organization"}), 404
+
+        # Remove the user from the organization
+        session.delete(user_to_remove)
+        session.commit()
+
+        return jsonify({
+            "message": f"User with ID {user_id} has been removed from organization {organization_id}."
+        }), 200
+
+    except Exception as e:
+        application.logger.error(f"Error removing user from organization: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
+
+
+@application.route('/organizations/<int:organization_id>/members', methods=['POST'])
+@jwt_required()
+def add_user_to_organization(organization_id):
+    """
+    Add a user to a specific organization.
+    """
+    session = None
+    try:
+        session = Session()
+
+        # Get the current user's ID and role from the JWT
+        current_user_id = get_current_user()['user_id']
+
+        # Check if the current user is an admin of the organization
+        current_user_role = session.query(OrganizationMember).filter_by(
+            organization_id=organization_id,
+            user_id=current_user_id
+        ).first()
+
+        if not current_user_role or current_user_role.role != 'admin':
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Parse the request data
+        data = request.get_json()
+        new_user_id = data.get("user_id")
+        new_user_role = data.get("role", "member")  # Default role is "member"
+
+        # Validate input
+        if not new_user_id:
+            return jsonify({"error": "Missing required field: user_id"}), 400
+        if new_user_role not in ["admin", "member"]:
+            return jsonify({"error": "Invalid role. Allowed values are 'admin' or 'member'."}), 400
+
+        # Check if the user already exists in the organization
+        existing_member = session.query(OrganizationMember).filter_by(
+            organization_id=organization_id,
+            user_id=new_user_id
+        ).first()
+
+        if existing_member:
+            return jsonify({"error": "User is already a member of the organization"}), 400
+
+        # Add the user to the organization
+        new_member = OrganizationMember(
+            organization_id=organization_id,
+            user_id=new_user_id,
+            role=new_user_role
+        )
+        session.add(new_member)
+        session.commit()
+
+        return jsonify({
+            "message": f"User with ID {new_user_id} has been added to organization {organization_id} as {new_user_role}."
+        }), 201
+
+    except Exception as e:
+        application.logger.error(f"Error adding user to organization: {e}")
+        return jsonify({"error": "An unexpected error occurred"}), 500
+
+    finally:
+        if session:
+            session.close()
