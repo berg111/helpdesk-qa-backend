@@ -1,5 +1,6 @@
 import os
 from flask import Flask, request, jsonify, make_response, send_file
+from flasgger import Swagger
 import io
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -28,6 +29,7 @@ load_dotenv()
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 
 application = Flask(__name__)
+Swagger(application)
 
 # JWT and Auth
 bcrypt = Bcrypt(application)
@@ -231,6 +233,50 @@ def index():
 
 @application.route('/register', methods=['POST'])
 def register():
+    """
+    Register a new user
+    ---
+    tags:
+      - Authentication
+    summary: Register a new user
+    description: Create a new user by providing an email and password.
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              description: The email address of the user
+              example: user@example.com
+            password:
+              type: string
+              description: The password for the user
+              example: securepassword123
+    responses:
+      201:
+        description: User registered successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: User registered successfully
+      400:
+        description: Validation error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: Email already exists
+    """
     data = request.json
     hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
     email = data['email']
@@ -247,6 +293,58 @@ def register():
 
 @application.route('/login', methods=['POST'])
 def login():
+    """
+    User Login
+    ---
+    tags:
+      - Authentication
+    summary: Log in a user and set a JWT as an HttpOnly cookie.
+    description: Authenticate a user by validating their email and password. If successful, returns a JWT token as an HttpOnly cookie.
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              description: The email address of the user
+              example: user@example.com
+            password:
+              type: string
+              description: The user's password
+              example: securepassword123
+    responses:
+      200:
+        description: Login successful, JWT token set in cookie
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Login successful
+        headers:
+          Set-Cookie:
+            description: HttpOnly cookie containing the JWT access token
+            schema:
+              type: string
+              example: access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      401:
+        description: Invalid credentials
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: Invalid credentials
+      500:
+        description: Internal server error
+    """
     with Session() as db_session:
         data = request.json
         user = db_session.query(User).filter_by(email=data['email']).first()
@@ -273,6 +371,25 @@ def login():
 @application.route('/logout', methods=['POST'])
 @jwt_required()
 def logout():
+    """
+    User Logout
+    ---
+    tags:
+      - Authentication
+    summary: Log out a user by clearing the JWT cookie.
+    description: Clears the JWT token by setting the `access_token` cookie to an empty value with `max_age=0`.
+    responses:
+      200:
+        description: Logout successful
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Login successful
+    """
     response = make_response(jsonify({"message": "Login successful"}))
     response.set_cookie(
         "access_token",
@@ -288,6 +405,41 @@ def logout():
 @application.route('/whoami', methods=['GET'])
 @jwt_required()
 def whoami():
+    """
+    User Identity
+    ---
+    tags:
+      - Authentication
+    summary: Get the identity of the currently logged-in user.
+    description: Returns the details of the user retrieved from the JWT token.
+    responses:
+      200:
+        description: Successfully retrieved user identity
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                logged_in_as:
+                  type: object
+                  properties:
+                    user_id:
+                      type: integer
+                      example: 1
+                    email:
+                      type: string
+                      example: user@example.com
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: Unauthorized
+    """
     try:
         current_user = get_current_user()
         print(type(current_user), current_user['user_id'], current_user['email'])
@@ -300,9 +452,76 @@ def whoami():
 @application.route('/upload-and-analyze', methods=['POST'])
 @jwt_required()
 def upload_and_analyze():
-    '''
-    Sends a job to worker
-    '''
+    """
+    Upload and Analyze Audio Files
+    ---
+    tags:
+      - Analysis
+    summary: Upload audio files for analysis and send jobs to workers.
+    description: Accepts audio files, validates input, and sends analysis jobs to workers. 
+                 Requires the user to be a member of the specified organization.
+    parameters:
+      - in: formData
+        name: audio_files
+        type: file
+        description: List of audio files to upload and analyze
+        required: true
+      - in: formData
+        name: organization_id
+        type: integer
+        description: The ID of the organization uploading the audio
+        required: true
+      - in: formData
+        name: agent_id
+        type: integer
+        description: The ID of the agent heard in the audio
+        required: true
+      - in: formData
+        name: standard_id
+        type: integer
+        description: The ID of the standard to compare the audio against
+        required: true
+      - in: formData
+        name: category_ids
+        type: string
+        description: Comma-separated list of category IDs to score
+        required: false
+      - in: formData
+        name: question_ids
+        type: string
+        description: Comma-separated list of question IDs to answer
+        required: false
+    responses:
+      200:
+        description: Successfully submitted jobs for analysis
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: integer
+              example: [101, 102, 103]
+      400:
+        description: Bad Request
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: No audio files provided
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: Unauthorized
+    """
     current_user = get_current_user()
     user_id = current_user['user_id']
     # Get audio files from request
@@ -350,7 +569,85 @@ def upload_and_analyze():
 @jwt_required()
 def get_interaction(interaction_id):
     """
-    Fetch a customer interaction by its ID.
+    Get Customer Interaction
+    ---
+    tags:
+      - Customer Interactions
+    summary: Fetch a specific customer interaction by its ID.
+    description: Retrieve detailed information about a specific customer interaction. The user must be authorized to access the organization associated with the interaction.
+    parameters:
+      - in: path
+        name: interaction_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the customer interaction to fetch
+    responses:
+      200:
+        description: Interaction retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customer_interaction_id:
+                  type: integer
+                  example: 123
+                organization_id:
+                  type: integer
+                  example: 1
+                audio_filename:
+                  type: string
+                  example: "audio123.mp3"
+                transcript_filename:
+                  type: string
+                  example: "transcript123.json"
+                analysis_filename:
+                  type: string
+                  example: "analysis123.json"
+                agent_id:
+                  type: integer
+                  example: 456
+                name:
+                  type: string
+                  example: "Interaction with Customer A"
+                status:
+                  type: string
+                  example: "COMPLETED"
+                created_at:
+                  type: string
+                  format: date-time
+                  example: "2024-01-01T12:00:00Z"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized. You don't have access to this organization."
+      404:
+        description: Interaction not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Interaction not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -398,7 +695,113 @@ def get_interaction(interaction_id):
 @jwt_required()
 def get_interactions_by_organization(organization_id):
     """
-    Fetch all customer interactions for a specific organization ID with pagination.
+    Get Customer Interactions for an Organization
+    ---
+    tags:
+      - Customer Interactions
+    summary: Fetch all customer interactions for a specific organization with pagination.
+    description: Retrieve a paginated list of customer interactions for a given organization ID. The user must be a member of the organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: query
+        name: per_page
+        required: false
+        schema:
+          type: integer
+          default: 10
+        description: The number of results per page
+      - in: query
+        name: page
+        required: false
+        schema:
+          type: integer
+          default: 1
+        description: The page number to fetch
+    responses:
+      200:
+        description: Successfully retrieved interactions
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                total_count:
+                  type: integer
+                  example: 100
+                page:
+                  type: integer
+                  example: 1
+                per_page:
+                  type: integer
+                  example: 10
+                results:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      customer_interaction_id:
+                        type: integer
+                        example: 123
+                      organization_id:
+                        type: integer
+                        example: 1
+                      audio_filename:
+                        type: string
+                        example: "audio123.mp3"
+                      transcript_filename:
+                        type: string
+                        example: "transcript123.json"
+                      analysis_filename:
+                        type: string
+                        example: "analysis123.json"
+                      agent_id:
+                        type: integer
+                        example: 456
+                      name:
+                        type: string
+                        example: "Interaction with Customer A"
+                      status:
+                        type: string
+                        example: "COMPLETED"
+                      created_at:
+                        type: string
+                        format: date-time
+                        example: "2024-01-01T12:00:00Z"
+      400:
+        description: Invalid pagination parameters
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Invalid pagination parameters. Page and per_page must be greater than 0."
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -457,43 +860,136 @@ def get_interactions_by_organization(organization_id):
             session.close()
 
 
-
 @application.route('/organizations/<int:organization_id>/interactions/filter', methods=['GET'])
 @jwt_required()
 def filter_customer_interactions(organization_id):
     """
-    Filter customer interactions based on multiple criteria, including min and max scores for categories.
-    
-    request:
-        - agents (list of integers): Filter by agent IDs.
-        - category_scores (JSON string): Example: {"1": 8, "2": 5} (filter interactions where category 1 scored >= 8 and category 2 scored >= 5).
-        - question_answers (JSON string): Example: {"3": "Yes", "4": "No"} (filter interactions where question 3 has "Yes" and question 4 has "No").
-        - standards (list of integers): Filter by standard IDs.
-        - needs_review (boolean): Filter interactions flagged for review.
-        - per_page (integer): Number of results per page (default: 10).
-        - page (integer): Page number (default: 1)
-
-    example response:
-    {
-        "total_count": 42,
-        "page": 1,
-        "per_page": 10,
-        "results": [
-            {
-            "interaction_id": 1,
-            "agent_id": 3,
-            "status": "COMPLETED",
-            "created_at": "2024-12-23T12:00:00Z"
-            },
-            {
-            "interaction_id": 2,
-            "agent_id": 5,
-            "status": "COMPLETED",
-            "created_at": "2024-12-23T12:05:00Z"
-            }
-        ]
-    }
-
+    Filter Customer Interactions
+    ---
+    tags:
+      - Customer Interactions
+    summary: Filter customer interactions based on multiple criteria.
+    description: Allows filtering of customer interactions by agent IDs, category scores, question and answer pairs, standards, and review flags. Supports pagination.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: query
+        name: agents
+        required: false
+        schema:
+          type: array
+          items:
+            type: integer
+        description: List of agent IDs to filter by
+      - in: query
+        name: category_scores
+        required: false
+        schema:
+          type: string
+        description: JSON string specifying category score filters. Example: {"1": {"min": 8, "max": 10}, "2": {"min": 5}}
+      - in: query
+        name: question_answers
+        required: false
+        schema:
+          type: string
+        description: JSON string specifying question-answer filters. Example: {"3": "Yes", "4": "No"}
+      - in: query
+        name: standards
+        required: false
+        schema:
+          type: array
+          items:
+            type: integer
+        description: List of standard IDs to filter by
+      - in: query
+        name: needs_review
+        required: false
+        schema:
+          type: boolean
+        description: Flag to filter interactions that are flagged for review
+      - in: query
+        name: per_page
+        required: false
+        schema:
+          type: integer
+          default: 10
+        description: Number of results per page
+      - in: query
+        name: page
+        required: false
+        schema:
+          type: integer
+          default: 1
+        description: The page number to fetch
+    responses:
+      200:
+        description: Successfully retrieved filtered interactions
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                total_count:
+                  type: integer
+                  example: 42
+                page:
+                  type: integer
+                  example: 1
+                per_page:
+                  type: integer
+                  example: 10
+                results:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      interaction_id:
+                        type: integer
+                        example: 1
+                      agent_id:
+                        type: integer
+                        example: 3
+                      status:
+                        type: string
+                        example: "COMPLETED"
+                      created_at:
+                        type: string
+                        format: date-time
+                        example: "2024-12-23T12:00:00Z"
+      400:
+        description: Invalid filter parameters
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Invalid pagination parameters. Page and per_page must be greater than 0."
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -585,7 +1081,77 @@ def filter_customer_interactions(organization_id):
 @jwt_required()
 def get_questions_and_answers(organization_id, interaction_id):
     """
-    Fetch all questions and their corresponding answers for a specific customer interaction.
+    Get Questions and Answers for a Customer Interaction
+    ---
+    tags:
+      - Customer Interactions
+    summary: Fetch all questions and their corresponding answers for a specific customer interaction.
+    description: Retrieves the list of questions and their answers associated with a given interaction within the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: interaction_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the customer interaction
+    responses:
+      200:
+        description: Successfully retrieved questions and answers
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  question_id:
+                    type: integer
+                    example: 1
+                  question:
+                    type: string
+                    example: "Did the agent greet the customer?"
+                  answer_id:
+                    type: integer
+                    example: 101
+                  answer:
+                    type: string
+                    example: "Yes"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Interaction not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Interaction not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -637,7 +1203,74 @@ def get_questions_and_answers(organization_id, interaction_id):
 @jwt_required()
 def get_category_scores(organization_id, interaction_id):
     """
-    Fetch all category scores for a specific customer interaction.
+    Get Category Scores for a Customer Interaction
+    ---
+    tags:
+      - Customer Interactions
+    summary: Fetch all category scores for a specific customer interaction.
+    description: Retrieves the list of category scores associated with a given interaction within the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: interaction_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the customer interaction
+    responses:
+      200:
+        description: Successfully retrieved category scores
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  category_id:
+                    type: integer
+                    example: 1
+                  category_name:
+                    type: string
+                    example: "Clarity"
+                  score:
+                    type: integer
+                    example: 8
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Interaction not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Interaction not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -688,7 +1321,75 @@ def get_category_scores(organization_id, interaction_id):
 @jwt_required()
 def get_interaction_summary(organization_id, interaction_id):
     """
-    Fetch the summary for a specific customer interaction.
+    Get Summary for a Customer Interaction
+    ---
+    tags:
+      - Customer Interactions
+    summary: Fetch the summary for a specific customer interaction.
+    description: Retrieves the summary of a given interaction within the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: interaction_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the customer interaction
+    responses:
+      200:
+        description: Successfully retrieved the interaction summary
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                summary_id:
+                  type: integer
+                  example: 10
+                interaction_id:
+                  type: integer
+                  example: 1
+                organization_id:
+                  type: integer
+                  example: 2
+                summary_text:
+                  type: string
+                  example: "The agent greeted the customer warmly and resolved the issue promptly."
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Interaction or summary not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Interaction not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -740,7 +1441,75 @@ def get_interaction_summary(organization_id, interaction_id):
 @jwt_required()
 def get_standard_comparison(organization_id, interaction_id):
     """
-    Fetch the standard comparison for a specific customer interaction.
+    Get Standard Comparison for a Customer Interaction
+    ---
+    tags:
+      - Customer Interactions
+    summary: Fetch the standard comparison for a specific customer interaction.
+    description: Retrieves the standard comparison text for a given interaction within the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: interaction_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the customer interaction
+    responses:
+      200:
+        description: Successfully retrieved the standard comparison
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                standard_comparison_id:
+                  type: integer
+                  example: 15
+                interaction_id:
+                  type: integer
+                  example: 1
+                standard_id:
+                  type: integer
+                  example: 5
+                comparison_text:
+                  type: string
+                  example: "The interaction closely follows the expected standard with minor deviations."
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Interaction or standard comparison not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Standard comparison not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -793,7 +1562,83 @@ def get_standard_comparison(organization_id, interaction_id):
 @jwt_required()
 def get_flagged_interactions_by_organization(organization_id):
     """
-    Fetch all customer interactions flagged for review for a specific organization ID.
+    Get Flagged Customer Interactions for an Organization
+    ---
+    tags:
+      - Customer Interactions
+    summary: Fetch all customer interactions flagged for review for a specific organization.
+    description: Retrieves a list of all customer interactions flagged for review within the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    responses:
+      200:
+        description: Successfully retrieved flagged interactions
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  customer_interaction_id:
+                    type: integer
+                    example: 101
+                  organization_id:
+                    type: integer
+                    example: 1
+                  audio_filename:
+                    type: string
+                    example: "audio123.mp3"
+                  transcript_filename:
+                    type: string
+                    example: "transcript123.json"
+                  analysis_filename:
+                    type: string
+                    example: "analysis123.json"
+                  agent_id:
+                    type: integer
+                    example: 456
+                  name:
+                    type: string
+                    example: "Interaction with Customer A"
+                  status:
+                    type: string
+                    example: "COMPLETED"
+                  created_at:
+                    type: string
+                    format: date-time
+                    example: "2024-01-01T12:00:00Z"
+                  flag_reason:
+                    type: string
+                    example: "Audio quality issues"
+                  was_reviewed:
+                    type: boolean
+                    example: false
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -857,7 +1702,83 @@ def get_flagged_interactions_by_organization(organization_id):
 @jwt_required()
 def get_recent_interactions_by_organization(organization_id, minutes):
     """
-    Fetch all customer interactions for a specific organization in the last `x` minutes.
+    Get Recent Customer Interactions for an Organization
+    ---
+    tags:
+      - Customer Interactions
+    summary: Fetch all customer interactions for a specific organization in the last `x` minutes.
+    description: Retrieves a list of customer interactions for a specified organization that occurred within the last `x` minutes.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: minutes
+        required: true
+        schema:
+          type: integer
+        description: The number of minutes to look back for interactions
+    responses:
+      200:
+        description: Successfully retrieved recent interactions
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  customer_interaction_id:
+                    type: integer
+                    example: 101
+                  organization_id:
+                    type: integer
+                    example: 1
+                  audio_filename:
+                    type: string
+                    example: "audio123.mp3"
+                  transcript_filename:
+                    type: string
+                    example: "transcript123.json"
+                  analysis_filename:
+                    type: string
+                    example: "analysis123.json"
+                  agent_id:
+                    type: integer
+                    example: 456
+                  name:
+                    type: string
+                    example: "Interaction with Customer A"
+                  status:
+                    type: string
+                    example: "COMPLETED"
+                  created_at:
+                    type: string
+                    format: date-time
+                    example: "2024-01-01T12:00:00Z"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -913,7 +1834,58 @@ def get_recent_interactions_by_organization(organization_id, minutes):
 @jwt_required()
 def get_questions_by_organization(organization_id):
     """
-    Fetch all questions for a specific organization ID.
+    Get Questions for an Organization
+    ---
+    tags:
+      - Questions
+    summary: Fetch all questions for a specific organization.
+    description: Retrieves a list of all questions associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    responses:
+      200:
+        description: Successfully retrieved questions
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  question_id:
+                    type: integer
+                    example: 1
+                  organization_id:
+                    type: integer
+                    example: 1
+                  question:
+                    type: string
+                    example: "Did the agent greet the customer?"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -953,7 +1925,61 @@ def get_questions_by_organization(organization_id):
 @jwt_required()
 def get_categories_by_organization(organization_id):
     """
-    Fetch all categories for a specific organization ID.
+    Get Categories for an Organization
+    ---
+    tags:
+      - Categories
+    summary: Fetch all categories for a specific organization.
+    description: Retrieves a list of all categories associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    responses:
+      200:
+        description: Successfully retrieved categories
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  category_id:
+                    type: integer
+                    example: 1
+                  organization_id:
+                    type: integer
+                    example: 1
+                  name:
+                    type: string
+                    example: "Politeness"
+                  description:
+                    type: string
+                    example: "Measures the politeness of the agent during the interaction."
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -994,7 +2020,61 @@ def get_categories_by_organization(organization_id):
 @jwt_required()
 def get_standards_by_organization(organization_id):
     """
-    Fetch all standards for a specific organization ID.
+    Get Standards for an Organization
+    ---
+    tags:
+      - Standards
+    summary: Fetch all standards for a specific organization.
+    description: Retrieves a list of all standards associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    responses:
+      200:
+        description: Successfully retrieved standards
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  standard_id:
+                    type: integer
+                    example: 1
+                  organization_id:
+                    type: integer
+                    example: 1
+                  name:
+                    type: string
+                    example: "Greeting Standard"
+                  description:
+                    type: string
+                    example: "Defines the expected greeting behavior of the agent."
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1035,16 +2115,80 @@ def get_standards_by_organization(organization_id):
 @jwt_required()
 def create_category(organization_id):
     """
-    Create a new category for a specific organization.
-
-    request:
-        Content-Type: application/json
-
-        {
-            "name": "Clarity",
-            "description": "Measures the clarity of communication in interactions."
-        }
-
+    Create a New Category for an Organization
+    ---
+    tags:
+      - Categories
+    summary: Create a new category for a specific organization.
+    description: Allows authorized users to create a new category for the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                example: "Clarity"
+                description: The name of the category
+              description:
+                type: string
+                example: "Measures the clarity of communication in interactions."
+                description: A brief description of the category
+            required:
+              - name
+    responses:
+      201:
+        description: Successfully created the category
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Category created successfully"
+                category_id:
+                  type: integer
+                  example: 1
+      400:
+        description: Invalid input
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Name is required"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1090,14 +2234,76 @@ def create_category(organization_id):
 @jwt_required()
 def create_question(organization_id):
     """
-    Create a new question for a specific organization.
-
-    request:
-        Content-Type: application/json
-
-        {
-            "question": "Did the agent greet the customer?"
-        }
+    Create a New Question for an Organization
+    ---
+    tags:
+      - Questions
+    summary: Create a new question for a specific organization.
+    description: Allows authorized users to create a new question for the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              question:
+                type: string
+                example: "Did the agent greet the customer?"
+                description: The text of the question
+            required:
+              - question
+    responses:
+      201:
+        description: Successfully created the question
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Question created successfully"
+                question_id:
+                  type: integer
+                  example: 1
+      400:
+        description: Invalid input
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Question text is required"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1141,15 +2347,80 @@ def create_question(organization_id):
 @jwt_required()
 def create_standard(organization_id):
     """
-    Create a new standard for a specific organization.
-
-    request:
-        Content-Type: application/json
-
-        {
-            "name": "Politeness Standard",
-            "description": "Defines the expected politeness level during interactions."
-        }
+    Create a New Standard for an Organization
+    ---
+    tags:
+      - Standards
+    summary: Create a new standard for a specific organization.
+    description: Allows authorized users to create a new standard for the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                example: "Politeness Standard"
+                description: The name of the standard
+              description:
+                type: string
+                example: "Defines the expected politeness level during interactions."
+                description: A brief description of the standard
+            required:
+              - name
+    responses:
+      201:
+        description: Successfully created the standard
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Standard created successfully"
+                standard_id:
+                  type: integer
+                  example: 1
+      400:
+        description: Invalid input
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Name is required"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1195,7 +2466,58 @@ def create_standard(organization_id):
 @jwt_required()
 def get_agents_by_organization(organization_id):
     """
-    Fetch all agents for a specific organization.
+    Get Agents for an Organization
+    ---
+    tags:
+      - Agents
+    summary: Fetch all agents for a specific organization.
+    description: Retrieves a list of all agents associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    responses:
+      200:
+        description: Successfully retrieved agents
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  agent_id:
+                    type: integer
+                    example: 1
+                  organization_id:
+                    type: integer
+                    example: 1
+                  name:
+                    type: string
+                    example: "Agent John Doe"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1234,12 +2556,76 @@ def get_agents_by_organization(organization_id):
 @jwt_required()
 def create_agent(organization_id):
     """
-    Create a new agent for a specific organization.
-
-    request:
-    {
-        "name": "Agent John Doe"
-    }
+    Create a New Agent for an Organization
+    ---
+    tags:
+      - Agents
+    summary: Create a new agent for a specific organization.
+    description: Allows authorized users to create a new agent for the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                example: "Agent John Doe"
+                description: The name of the agent
+            required:
+              - name
+    responses:
+      201:
+        description: Successfully created the agent
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Agent created successfully"
+                agent_id:
+                  type: integer
+                  example: 1
+      400:
+        description: Invalid input
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Agent name is required"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1279,13 +2665,78 @@ def create_agent(organization_id):
             session.close()
 
 
-from datetime import datetime, timedelta
-
 @application.route('/organizations/<int:organization_id>/categories/<int:category_id>/scores/recent/<int:minutes>', methods=['GET'])
 @jwt_required()
 def get_recent_scores_by_organization_and_category(organization_id, category_id, minutes):
     """
-    Fetch all scores for a particular organization and category from the last `x` minutes.
+    Get Recent Scores by Organization and Category
+    ---
+    tags:
+      - Scores
+    summary: Fetch all scores for a particular organization and category from the last `x` minutes.
+    description: Retrieves scores for a specific category and organization within the last `x` minutes.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: category_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the category
+      - in: path
+        name: minutes
+        required: true
+        schema:
+          type: integer
+        description: The number of minutes to look back for scores
+    responses:
+      200:
+        description: Successfully retrieved recent scores
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  category_score_id:
+                    type: integer
+                    example: 1
+                  customer_interaction_id:
+                    type: integer
+                    example: 101
+                  score:
+                    type: integer
+                    example: 8
+                  created_at:
+                    type: string
+                    format: date-time
+                    example: "2024-01-01T12:00:00Z"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1336,13 +2787,81 @@ def get_recent_scores_by_organization_and_category(organization_id, category_id,
             session.close()
 
 
-from datetime import datetime, timedelta
-
 @application.route('/organizations/<int:organization_id>/questions/<int:question_id>/answers/recent/<int:minutes>', methods=['GET'])
 @jwt_required()
 def get_recent_answers_by_organization_and_question(organization_id, question_id, minutes):
     """
-    Fetch all answers for a particular organization and question from the last `x` minutes.
+    Get Recent Answers by Organization and Question
+    ---
+    tags:
+      - Answers
+    summary: Fetch all answers for a particular organization and question from the last `x` minutes.
+    description: Retrieves answers for a specific question and organization within the last `x` minutes.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: question_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the question
+      - in: path
+        name: minutes
+        required: true
+        schema:
+          type: integer
+        description: The number of minutes to look back for answers
+    responses:
+      200:
+        description: Successfully retrieved recent answers
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  answer_id:
+                    type: integer
+                    example: 1
+                  customer_interaction_id:
+                    type: integer
+                    example: 101
+                  question_id:
+                    type: integer
+                    example: 10
+                  answer:
+                    type: string
+                    example: "Yes"
+                  created_at:
+                    type: string
+                    format: date-time
+                    example: "2024-01-01T12:00:00Z"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1398,7 +2917,90 @@ def get_recent_answers_by_organization_and_question(organization_id, question_id
 @jwt_required()
 def get_configurations_by_organization(organization_id):
     """
-    Fetch all configurations for a specific organization.
+    Get Configurations for an Organization
+    ---
+    tags:
+      - Configurations
+    summary: Fetch all configurations for a specific organization.
+    description: Retrieves a list of all configurations associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    responses:
+      200:
+        description: Successfully retrieved configurations
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  configuration_id:
+                    type: integer
+                    example: 1
+                  name:
+                    type: string
+                    example: "Customer Service Config"
+                  description:
+                    type: string
+                    example: "Default configuration for customer service interactions."
+                  questions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        question_id:
+                          type: integer
+                          example: 101
+                        question_text:
+                          type: string
+                          example: "Did the agent greet the customer?"
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category_id:
+                          type: integer
+                          example: 1
+                        category_name:
+                          type: string
+                          example: "Politeness"
+                  standard:
+                    type: object
+                    nullable: true
+                    properties:
+                      standard_id:
+                        type: integer
+                        example: 10
+                      standard_name:
+                        type: string
+                        example: "Greeting Standard"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1449,16 +3051,97 @@ def get_configurations_by_organization(organization_id):
 @jwt_required()
 def create_configuration(organization_id):
     """
-    Create a new configuration for a specific organization.
-
-    Request:
-    {
-        "name": "Customer Feedback Configuration",
-        "description": "A configuration for analyzing customer feedback.",
-        "questions": [1, 2],  // List of question IDs
-        "categories": [3, 4], // List of category IDs
-        "standard": 5         // Standard ID (optional)
-    }
+    Create a New Configuration for an Organization
+    ---
+    tags:
+      - Configurations
+    summary: Create a new configuration for a specific organization.
+    description: Allows authorized users to create a configuration with associated questions, categories, and an optional standard.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                example: "Customer Feedback Configuration"
+                description: The name of the configuration
+              description:
+                type: string
+                example: "A configuration for analyzing customer feedback."
+                description: A brief description of the configuration
+              questions:
+                type: array
+                items:
+                  type: integer
+                example: [1, 2]
+                description: List of question IDs to associate with the configuration
+              categories:
+                type: array
+                items:
+                  type: integer
+                example: [3, 4]
+                description: List of category IDs to associate with the configuration
+              standard:
+                type: integer
+                nullable: true
+                example: 5
+                description: The standard ID to associate with the configuration (optional)
+            required:
+              - name
+    responses:
+      201:
+        description: Successfully created the configuration
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Configuration created successfully"
+                configuration_id:
+                  type: integer
+                  example: 1
+      400:
+        description: Invalid input
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Configuration name is required"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1522,7 +3205,69 @@ def create_configuration(organization_id):
 @jwt_required()
 def delete_configuration(organization_id, configuration_id):
     """
-    Delete a configuration for a specific organization.
+    Delete a Configuration for an Organization
+    ---
+    tags:
+      - Configurations
+    summary: Delete a configuration for a specific organization.
+    description: Allows authorized users to delete a configuration associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: configuration_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the configuration to delete
+    responses:
+      200:
+        description: Successfully deleted the configuration
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Configuration deleted successfully"
+                configuration_id:
+                  type: integer
+                  example: 1
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Configuration not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Configuration not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1565,7 +3310,69 @@ def delete_configuration(organization_id, configuration_id):
 @jwt_required()
 def delete_agent(organization_id, agent_id):
     """
-    Delete an agent for a specific organization.
+    Delete an Agent for an Organization
+    ---
+    tags:
+      - Agents
+    summary: Delete an agent for a specific organization.
+    description: Allows authorized users to delete an agent associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: agent_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the agent to delete
+    responses:
+      200:
+        description: Successfully deleted the agent
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Agent deleted successfully"
+                agent_id:
+                  type: integer
+                  example: 1
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Agent not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Agent not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1608,7 +3415,69 @@ def delete_agent(organization_id, agent_id):
 @jwt_required()
 def delete_question(organization_id, question_id):
     """
-    Delete a question for a specific organization.
+    Delete a Question for an Organization
+    ---
+    tags:
+      - Questions
+    summary: Delete a question for a specific organization.
+    description: Allows authorized users to delete a question associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: question_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the question to delete
+    responses:
+      200:
+        description: Successfully deleted the question
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Question deleted successfully"
+                question_id:
+                  type: integer
+                  example: 1
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Question not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Question not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1651,7 +3520,69 @@ def delete_question(organization_id, question_id):
 @jwt_required()
 def delete_category(organization_id, category_id):
     """
-    Delete a category for a specific organization.
+    Delete a Category for an Organization
+    ---
+    tags:
+      - Categories
+    summary: Delete a category for a specific organization.
+    description: Allows authorized users to delete a category associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: category_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the category to delete
+    responses:
+      200:
+        description: Successfully deleted the category
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Category deleted successfully"
+                category_id:
+                  type: integer
+                  example: 1
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Category not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Category not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1694,7 +3625,69 @@ def delete_category(organization_id, category_id):
 @jwt_required()
 def delete_standard(organization_id, standard_id):
     """
-    Delete a standard for a specific organization.
+    Delete a Standard for an Organization
+    ---
+    tags:
+      - Standards
+    summary: Delete a standard for a specific organization.
+    description: Allows authorized users to delete a standard associated with the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: standard_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the standard to delete
+    responses:
+      200:
+        description: Successfully deleted the standard
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Standard deleted successfully"
+                standard_id:
+                  type: integer
+                  example: 1
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Standard not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Standard not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1737,9 +3730,113 @@ def delete_standard(organization_id, standard_id):
 @jwt_required()
 def get_audio_segments_with_speaker_labels_sentiments_and_silent_periods(organization_id, interaction_id):
     """
-    Retrieve audio segments from S3, map the speaker labels using the speaker_labels table,
-    include sentiments for each segment, and silent periods from the silent_periods table.
-    Ensure the interaction is in the 'COMPLETED' state.
+    Retrieve Audio Segments with Speaker Labels, Sentiments, and Silent Periods
+    ---
+    tags:
+      - Interactions
+    summary: Retrieve audio segments from S3, map speaker labels, include sentiments, and silent periods.
+    description: Fetches audio segments from S3, maps the speaker labels using the speaker_labels table, includes sentiments for each segment, and retrieves silent periods for the interaction. Ensures the interaction is in the 'COMPLETED' state.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: interaction_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the interaction
+    responses:
+      200:
+        description: Successfully retrieved audio segments with additional details
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                interaction_id:
+                  type: integer
+                  example: 1
+                segments:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      segment_id:
+                        type: integer
+                        example: 1
+                      start_time:
+                        type: string
+                        example: "0.0"
+                      end_time:
+                        type: string
+                        example: "2.0"
+                      transcript:
+                        type: string
+                        example: "Hello, how can I help you?"
+                      speaker_label:
+                        type: string
+                        example: "Agent"
+                      sentiment:
+                        type: string
+                        example: "Positive"
+                silent_periods:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      silent_period_id:
+                        type: integer
+                        example: 1
+                      start_time_sec:
+                        type: number
+                        example: 5.5
+                      end_time_sec:
+                        type: number
+                        example: 7.5
+      400:
+        description: Interaction is not in 'COMPLETED' state
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Interaction is not in 'COMPLETED' state"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Interaction not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Interaction not found"
+      500:
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1831,7 +3928,63 @@ def get_audio_segments_with_speaker_labels_sentiments_and_silent_periods(organiz
 @jwt_required()
 def download_audio_file(organization_id, interaction_id):
     """
-    Download the audio file for a specific interaction.
+    Download Audio File for an Interaction
+    ---
+    tags:
+      - Interactions
+    summary: Download the audio file for a specific interaction.
+    description: Fetches the audio file for a given interaction from S3 and returns it as a downloadable file.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: interaction_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the interaction
+    responses:
+      200:
+        description: Audio file successfully retrieved
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: Interaction not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Interaction not found"
+      500:
+        description: Unable to fetch audio file
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unable to fetch audio file"
     """
     session = None
     try:
@@ -1885,7 +4038,112 @@ def download_audio_file(organization_id, interaction_id):
 @jwt_required()
 def get_agent_interactions_in_last_x_minutes(organization_id, agent_id):
     """
-    Fetch customer interactions for a specific agent from the last X minutes.
+    Fetch Agent Interactions in Last X Minutes
+    ---
+    tags:
+      - Agents
+    summary: Fetch customer interactions for a specific agent within a specified time range.
+    description: Retrieve customer interactions associated with a specific agent in the last X minutes.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: agent_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the agent
+      - in: query
+        name: minutes
+        required: true
+        schema:
+          type: integer
+          example: 60
+        description: The time range in minutes to fetch interactions for
+    responses:
+      200:
+        description: Successfully retrieved interactions
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agent_id:
+                  type: integer
+                  example: 1
+                organization_id:
+                  type: integer
+                  example: 1
+                time_range:
+                  type: string
+                  example: "Last 60 minutes"
+                interactions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      customer_interaction_id:
+                        type: integer
+                        example: 1
+                      organization_id:
+                        type: integer
+                        example: 1
+                      agent_id:
+                        type: integer
+                        example: 2
+                      audio_filename:
+                        type: string
+                        example: "audio_1.mp3"
+                      transcript_filename:
+                        type: string
+                        example: "transcript_1.json"
+                      analysis_filename:
+                        type: string
+                        example: "analysis_1.json"
+                      name:
+                        type: string
+                        example: "Interaction Name"
+                      status:
+                        type: string
+                        example: "COMPLETED"
+                      created_at:
+                        type: string
+                        format: date-time
+                        example: "2024-12-23T12:00:00Z"
+      400:
+        description: Invalid input for minutes
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "'minutes' must be a positive integer"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Unexpected error occurred
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -1947,7 +4205,100 @@ def get_agent_interactions_in_last_x_minutes(organization_id, agent_id):
 @jwt_required()
 def get_agent_category_scores_in_last_x_minutes(organization_id, agent_id):
     """
-    Fetch category scores for a specific agent from the last X minutes.
+    Fetch Agent Category Scores in Last X Minutes
+    ---
+    tags:
+      - Agents
+    summary: Fetch category scores for a specific agent within a specified time range.
+    description: Retrieve category scores associated with a specific agent in the last X minutes.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: agent_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the agent
+      - in: query
+        name: minutes
+        required: true
+        schema:
+          type: integer
+          example: 60
+        description: The time range in minutes to fetch category scores for
+    responses:
+      200:
+        description: Successfully retrieved category scores
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agent_id:
+                  type: integer
+                  example: 1
+                organization_id:
+                  type: integer
+                  example: 1
+                time_range:
+                  type: string
+                  example: "Last 60 minutes"
+                category_scores:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      category_id:
+                        type: integer
+                        example: 3
+                      category_name:
+                        type: string
+                        example: "Politeness"
+                      score:
+                        type: integer
+                        example: 8
+                      interaction_id:
+                        type: integer
+                        example: 12
+                      interaction_created_at:
+                        type: string
+                        format: date-time
+                        example: "2024-12-23T12:05:00Z"
+      400:
+        description: Invalid input for minutes
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "'minutes' must be a positive integer"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Unexpected error occurred
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -2009,7 +4360,103 @@ def get_agent_category_scores_in_last_x_minutes(organization_id, agent_id):
 @jwt_required()
 def get_agent_questions_and_answers_in_last_x_minutes(organization_id, agent_id):
     """
-    Fetch questions and their answers for a specific agent from the last X minutes.
+    Fetch Agent Questions and Answers in Last X Minutes
+    ---
+    tags:
+      - Agents
+    summary: Fetch questions and their answers for a specific agent within a specified time range.
+    description: Retrieve questions and their corresponding answers for interactions associated with a specific agent in the last X minutes.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization
+      - in: path
+        name: agent_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the agent
+      - in: query
+        name: minutes
+        required: true
+        schema:
+          type: integer
+          example: 60
+        description: The time range in minutes to fetch questions and answers for
+    responses:
+      200:
+        description: Successfully retrieved questions and answers
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agent_id:
+                  type: integer
+                  example: 1
+                organization_id:
+                  type: integer
+                  example: 1
+                time_range:
+                  type: string
+                  example: "Last 60 minutes"
+                questions_answers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      question_id:
+                        type: integer
+                        example: 3
+                      question_text:
+                        type: string
+                        example: "Did the agent greet the customer?"
+                      answer_id:
+                        type: integer
+                        example: 7
+                      answer_text:
+                        type: string
+                        example: "Yes"
+                      interaction_id:
+                        type: integer
+                        example: 12
+                      interaction_created_at:
+                        type: string
+                        format: date-time
+                        example: "2024-12-23T12:05:00Z"
+      400:
+        description: Invalid input for minutes
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "'minutes' must be a positive integer"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Unexpected error occurred
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -2072,7 +4519,61 @@ def get_agent_questions_and_answers_in_last_x_minutes(organization_id, agent_id)
 @jwt_required()
 def get_organizations_for_user(user_id):
     """
-    Fetch all organizations associated with a specific user.
+    Get User Organizations
+    ---
+    tags:
+      - Users
+    summary: Fetch all organizations associated with a specific user.
+    description: Retrieve a list of organizations that the user is a member of.
+    parameters:
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the user.
+    responses:
+      200:
+        description: Successfully retrieved organizations for the user.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: integer
+                  example: 42
+                organizations:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      organization_id:
+                        type: integer
+                        example: 1
+                      name:
+                        type: string
+                        example: "Customer Service QA"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Unexpected error occurred
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -2117,7 +4618,67 @@ def get_organizations_for_user(user_id):
 @jwt_required()
 def get_members_for_organization(organization_id):
     """
-    Fetch all members associated with a specific organization.
+    Get Organization Members
+    ---
+    tags:
+      - Organizations
+    summary: Fetch all members associated with a specific organization.
+    description: Retrieve a list of users who are members of the specified organization.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization.
+    responses:
+      200:
+        description: Successfully retrieved members of the organization.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organization_id:
+                  type: integer
+                  example: 1
+                members:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      user_id:
+                        type: integer
+                        example: 42
+                      name:
+                        type: string
+                        example: "John Doe"
+                      email:
+                        type: string
+                        example: "john.doe@example.com"
+                      role:
+                        type: string
+                        example: "admin"
+      401:
+        description: Unauthorized
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Unexpected error occurred
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -2169,7 +4730,66 @@ def get_members_for_organization(organization_id):
 @jwt_required()
 def remove_user_from_organization(organization_id, user_id):
     """
-    Remove a user from a specific organization.
+    Remove User from Organization
+    ---
+    tags:
+      - Organizations
+    summary: Remove a user from a specific organization.
+    description: Deletes a user's membership from the specified organization. Only admins can perform this action.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization.
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the user to remove.
+    responses:
+      200:
+        description: User successfully removed from the organization.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "User with ID 42 has been removed from organization 1."
+      401:
+        description: Unauthorized or insufficient permissions.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      404:
+        description: User not found in the organization.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "User not found in the organization"
+      500:
+        description: Unexpected error occurred.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred"
     """
     session = None
     try:
@@ -2217,7 +4837,74 @@ def remove_user_from_organization(organization_id, user_id):
 @jwt_required()
 def add_user_to_organization(organization_id):
     """
-    Add a user to a specific organization.
+    Add User to Organization
+    ---
+    tags:
+      - Organizations
+    summary: Add a user to a specific organization.
+    description: Adds a new member to the specified organization. Only admins can perform this action.
+    parameters:
+      - in: path
+        name: organization_id
+        required: true
+        schema:
+          type: integer
+        description: The ID of the organization.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              user_id:
+                type: integer
+                description: The ID of the user to add.
+              role:
+                type: string
+                enum: [admin, member]
+                description: The role to assign to the user. Defaults to "member".
+    responses:
+      201:
+        description: User successfully added to the organization.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "User with ID 42 has been added to organization 1 as member."
+      400:
+        description: Validation error or user already exists in the organization.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "User is already a member of the organization."
+      401:
+        description: Unauthorized or insufficient permissions.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Unauthorized"
+      500:
+        description: Unexpected error occurred.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred."
     """
     session = None
     try:
@@ -2281,7 +4968,56 @@ def add_user_to_organization(organization_id):
 @jwt_required()
 def create_organization():
     """
-    Create a new organization and assign the calling user as the 'owner'.
+    Create Organization
+    ---
+    tags:
+      - Organizations
+    summary: Create a new organization and assign the calling user as the 'owner'.
+    description: This endpoint creates a new organization with the specified name and assigns the calling user the role of 'owner' in the organization.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                description: The name of the organization to create.
+    responses:
+      201:
+        description: Organization successfully created.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Organization 'Tech Solutions' created successfully."
+                organization_id:
+                  type: integer
+                  example: 1
+      400:
+        description: Validation error.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "Missing required field: name."
+      500:
+        description: Unexpected error occurred.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: "An unexpected error occurred."
     """
     session = None
     try:
