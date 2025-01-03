@@ -29,7 +29,45 @@ load_dotenv()
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 
 application = Flask(__name__)
-Swagger(application)
+# Swagger Template with Valid Version Field
+swagger_template = {
+    "swagger": "2.0",  # Specify the Swagger version
+    "info": {
+        "title": "Your API Name",
+        "description": "API documentation for your Flask application.",
+        "version": "1.0.0"
+    },
+    "host": "127.0.0.1:5000",  # Change to your server's host/port
+    "basePath": "/",  # Base path for the API
+    "schemes": ["http", "https"],  # Supported schemes
+    "securityDefinitions": {
+        "Bearer": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "Enter your JWT token in the format: Bearer <token>"
+        }
+    }
+}
+
+# Swagger Configuration
+swagger_config = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": "apispec",
+            "route": "/apispec.json",
+            "rule_filter": lambda rule: True,  # Include all endpoints
+            "model_filter": lambda tag: True,  # Include all tags
+        }
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/docs/"
+}
+
+# Initialize Swagger with Template and Config
+Swagger(application, template=swagger_template, config=swagger_config)
 
 # JWT and Auth
 bcrypt = Bcrypt(application)
@@ -890,13 +928,13 @@ def filter_customer_interactions(organization_id):
         required: false
         schema:
           type: string
-        description: JSON string specifying category score filters. Example: {"1": {"min": 8, "max": 10}, "2": {"min": 5}}
+        description: JSON string specifying category score filters. Example; {"1"; {"min"; 8, "max"; 10}, "2"; {"min"; 5}}
       - in: query
         name: question_answers
         required: false
         schema:
           type: string
-        description: JSON string specifying question-answer filters. Example: {"3": "Yes", "4": "No"}
+        description: JSON string specifying question-answer filters. Example; {"3"; "Yes", "4"; "No"}
       - in: query
         name: standards
         required: false
